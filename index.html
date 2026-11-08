@@ -172,7 +172,7 @@ input[type="text"]:focus { outline: none; border-color: var(--amber); }
     <div class="hud" id="hud">
       <div class="gauge g-speed" id="gspd"><small>Velocità</small><strong id="spd">0</strong><em>km/h</em></div>
       <div class="gauge g-dist"><small>Percorsi</small><strong id="dst">0</strong><em>m</em></div>
-      <div class="gauge g-time" id="gtime"><small>Tempo</small><strong id="tim">30.0</strong><em>s</em></div>
+      <div class="gauge g-time" id="gtime"><small>Tempo</small><strong id="tim">24.0</strong><em>s</em></div>
     </div>
     <div class="sub" id="sub">
       <span class="chip cp" id="cpChip">Traguardo tra <b id="cpLeft">1200</b> m</span>
@@ -259,9 +259,9 @@ input[type="text"]:focus { outline: none; border-color: var(--amber); }
   const OFF_LIMIT = MAX_SPEED / 4;
   const CENTRIFUGAL = 0.3;
   const UPM = 180;                         // units per metre
-  const START_TIME = 30;
+  const START_TIME = 24;
   const CP_FIRST = 1200, CP_GAP = 1400;
-  const cpBonus = (k) => Math.max(18, 28 - k);
+  const cpBonus = (k) => Math.max(14, 24 - k);
   const kmh = (u) => Math.round((u / MAX_SPEED) * 240);
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const rnd = (a, b) => a + Math.random() * (b - a);
