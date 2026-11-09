@@ -353,7 +353,7 @@ export class World {
       const d = this.difficulty(s);
       const nearCp = this.cpS(this.cpAround(s)) - s;
       if (Math.abs(nearCp) > 40) {
-        const weights = [["clock", 26], ["turbo", 18], ["shield", 12], ["oil", 16 + 16 * d], ["cones", 14 + 18 * d]];
+        const weights = [["clock", 18], ["turbo", 18], ["shield", 12], ["oil", 16 + 16 * d], ["cones", 14 + 18 * d]];
         const tot = weights.reduce((a, w) => a + w[1], 0);
         let roll = Math.random() * tot, type = "clock";
         for (const [t, w] of weights) if ((roll -= w) < 0) { type = t; break; }
@@ -367,7 +367,7 @@ export class World {
       const lane = pick([-LANE_W, 0, LANE_W]);
       const n = 4 + Math.floor(Math.random() * 4);
       for (let i = 0; i < n; i++) this.items.push({ s: this.nextCoinS + i * 7, x: lane, type: "coin", taken: false, obj: null });
-      this.nextCoinS += n * 7 + rnd(110, 240);
+      this.nextCoinS += n * 7 + rnd(260, 460);
     }
   }
   cpS(k) { return START_S + CP_FIRST + CP_GAP * k; }

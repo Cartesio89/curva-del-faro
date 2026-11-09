@@ -172,15 +172,42 @@ function openGarage() {
   renderGarage(true);
   show("scrGarage");
 }
-function statBar(label, value, frac, text) {
+// value bar with a tick at the reference value and the difference in numbers
+function statBar(label, frac, refFrac, text, delta, good, refLabel) {
   const row = document.createElement("div"); row.className = "bar";
   const a = document.createElement("span"); a.textContent = label;
   const t = document.createElement("span"); t.className = "track-bar";
-  const f = document.createElement("span"); f.className = "fill"; f.style.width = Math.round(Math.max(0.04, Math.min(1, frac)) * 100) + "%"; f.style.display = "block";
+  const clampF = (f) => Math.max(0.04, Math.min(1, f));
+  const f = document.createElement("span"); f.className = "fill"; f.style.width = Math.round(clampF(frac) * 100) + "%"; f.style.display = "block";
   t.appendChild(f);
+  if (refFrac != null) { const tick = document.createElement("i"); tick.className = "tick"; tick.style.left = Math.round(clampF(refFrac) * 100) + "%"; t.appendChild(tick); }
   const b = document.createElement("b"); b.textContent = text;
+  if (delta) { const d = document.createElement("small"); d.className = good ? "up" : "down"; d.textContent = delta; b.appendChild(d); }
   row.append(a, t, b);
   return row;
+}
+const pct = (x) => (x > 1 ? "+" : "−") + Math.round(Math.abs(x - 1) * 100) + "%";
+function effectText(key, value) {
+  if (key === "color") return "solo estetica";
+  const o = PARTS[key].options.find((x) => x.id === value);
+  const bits = [];
+  if (o.top && o.top !== 1) bits.push(`velocità max ${pct(o.top)}`);
+  if (o.acc && o.acc !== 1) bits.push(`accelerazione ${pct(o.acc)}`);
+  if (o.grip && o.grip !== 1) bits.push(`tenuta ${pct(o.grip)}`);
+  return bits.length ? bits.join(", ") : "solo estetica";
+}
+function perfBars(car, cfg, refCfg, refLabel) {
+  const p = perfOf(car, cfg), r = perfOf(car, refCfg);
+  const fTop = (v) => (v - 150) / 260, fAcc = (v) => (13 - v) / 11, fGrip = (v) => (v - 8) / 14;
+  const dTop = Math.round(p.topKmh - r.topKmh), dAcc = p.acc0100 - r.acc0100, dGrip = (p.grip - r.grip) / 9.81;
+  const num = (x, dec) => x.toFixed(dec).replace(".", ",");
+  const cap = document.createElement("p"); cap.className = "cmp";
+  cap.textContent = `Differenze rispetto alla versione ${refLabel}. La tacca bianca è il valore ${refLabel}.`;
+  return [cap,
+    statBar("Velocità", fTop(p.topKmh), fTop(r.topKmh), Math.round(p.topKmh) + " km/h", dTop ? (dTop > 0 ? "+" : "−") + Math.abs(dTop) + " km/h" : "", dTop > 0, refLabel),
+    statBar("0-100", fAcc(p.acc0100), fAcc(r.acc0100), num(p.acc0100, 1) + " s", Math.abs(dAcc) >= 0.05 ? (dAcc > 0 ? "+" : "−") + num(Math.abs(dAcc), 1) + " s" : "", dAcc < 0, refLabel),
+    statBar("Tenuta", fGrip(p.grip), fGrip(r.grip), num(p.grip / 9.81, 2) + " g", Math.abs(dGrip) >= 0.005 ? (dGrip > 0 ? "+" : "−") + num(Math.abs(dGrip), 2) + " g" : "", dGrip > 0, refLabel)
+  ];
 }
 let gAction = null;
 function renderGarage(rebuildModel) {
@@ -196,13 +223,9 @@ function renderGarage(rebuildModel) {
   const lock = $("gLock");
   lock.hidden = !locked;
   lock.textContent = locked ? `Bloccata: ${unlockText(car)}.` : "";
-  const p = perfOf(car, cfg);
   const st = $("gStats"); st.textContent = "";
-  st.append(
-    statBar("Velocità", p.topKmh, (p.topKmh - 150) / 260, Math.round(p.topKmh) + " km/h"),
-    statBar("0-100", p.acc0100, (13 - p.acc0100) / 11, p.acc0100.toFixed(1).replace(".", ",") + " s"),
-    statBar("Tenuta", p.grip, (p.grip - 8) / 14, (p.grip / 9.81).toFixed(2).replace(".", ",") + " g")
-  );
+  if (preview) st.append(...perfBars(car, cfg, cfgFor(car), "montata"));
+  else st.append(...perfBars(car, cfg, cleanConfig(car, null), "di serie"));
   const parts = $("gParts"); parts.textContent = "";
   const canEdit = !locked && owned;
   const optButton = (key, value, label, isSwatch) => {
@@ -249,8 +272,8 @@ function renderGarage(rebuildModel) {
     gAction = { item: `${preview.key}:${preview.value}`, price, key: preview.key, value: preview.value }; use.disabled = coins < price;
   } else if (garage.sel === car.id) use.textContent = "In uso";
   else { use.textContent = "Usa questa auto"; use.disabled = false; gAction = { use: true }; }
-  if (gAction && gAction.price != null && coins < gAction.price) msg.textContent = `Hai ${fmtC(coins)}: ti mancano ${fmtC(gAction.price - coins)}.`;
-  else if (preview) msg.textContent = "Anteprima: le statistiche mostrano il pezzo prima di comprarlo.";
+  if (gAction && gAction.price != null && coins < gAction.price) msg.textContent = (preview ? `${effectText(preview.key, preview.value)}. ` : "") + `Hai ${fmtC(coins)}: ti mancano ${fmtC(gAction.price - coins)}.`;
+  else if (preview) msg.textContent = `Anteprima ${preview.label}: ${effectText(preview.key, preview.value)}.`;
   else msg.textContent = "";
   msg.hidden = !msg.textContent;
 }

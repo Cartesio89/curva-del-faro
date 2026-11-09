@@ -5,7 +5,7 @@ export const LANE_W = 3.6;
 export const LANES = 3;
 export const ROAD_HALF = (LANE_W * LANES) / 2; // 5.4 m
 
-export const START_TIME = 28;
+export const START_TIME = 26;
 export const CP_FIRST = 600;
 export const CP_GAP = 1200;
 export const START_S = 60; // the car starts a bit down the road so there is tarmac behind the camera
@@ -18,31 +18,31 @@ export const CARS = [
     unlock: { km: 0, cp: 0 },
     shape: { type: "hatch", L: 3.6, W: 1.64, H: 1.5, belt: 0.95, clr: 0.16, nose: 0.78, cabin: [0.27, 0.9], ws: 0.17, wheel: 0.3 } },
   { id: "gabbiano", name: "Gabbiano", kind: "Hatchback sportiva", top: 210, acc: 8.5, grip: 11.5, mass: 0.45,
-    unlock: { km: 5, cp: 3 },
+    unlock: { km: 8, cp: 4 },
     shape: { type: "hatch", L: 4.05, W: 1.76, H: 1.44, belt: 0.92, clr: 0.14, nose: 0.74, cabin: [0.3, 0.88], ws: 0.2, wheel: 0.32 } },
   { id: "delfino", name: "Delfino", kind: "Berlina", top: 225, acc: 7.6, grip: 11.5, mass: 0.6,
-    unlock: { km: 12, cp: 4 },
+    unlock: { km: 20, cp: 5 },
     shape: { type: "notch", L: 4.7, W: 1.82, H: 1.45, belt: 0.92, clr: 0.15, nose: 0.76, cabin: [0.31, 0.76], ws: 0.2, wheel: 0.33 } },
   { id: "medusa", name: "Medusa", kind: "Spider", top: 230, acc: 6.8, grip: 13, mass: 0.4,
-    unlock: { km: 25, cp: 5 },
+    unlock: { km: 40, cp: 6 },
     shape: { type: "roadster", L: 4.0, W: 1.75, H: 1.22, belt: 0.86, clr: 0.13, nose: 0.66, cabin: [0.42, 0.66], ws: 0.14, wheel: 0.32 } },
   { id: "cormorano", name: "Cormorano", kind: "Rally", top: 220, acc: 5.9, grip: 14, mass: 0.55,
-    unlock: { km: 40, cp: 6 },
+    unlock: { km: 65, cp: 7 },
     shape: { type: "hatch", L: 4.1, W: 1.82, H: 1.5, belt: 0.98, clr: 0.24, nose: 0.8, cabin: [0.3, 0.88], ws: 0.2, wheel: 0.34 } },
   { id: "squalo", name: "Squalo", kind: "Muscle car", top: 260, acc: 5.0, grip: 11.5, mass: 0.8,
-    unlock: { km: 60, cp: 7 },
+    unlock: { km: 100, cp: 8 },
     shape: { type: "fastback", L: 4.85, W: 1.92, H: 1.36, belt: 0.9, clr: 0.14, nose: 0.82, cabin: [0.42, 0.92], ws: 0.17, wheel: 0.35 } },
   { id: "falco", name: "Falco", kind: "Gran turismo", top: 280, acc: 4.4, grip: 13.5, mass: 0.65,
-    unlock: { km: 90, cp: 8 },
+    unlock: { km: 150, cp: 9 },
     shape: { type: "fastback", L: 4.6, W: 1.9, H: 1.3, belt: 0.84, clr: 0.12, nose: 0.66, cabin: [0.38, 0.9], ws: 0.22, wheel: 0.35 } },
   { id: "orca", name: "Orca", kind: "Supercar", top: 300, acc: 3.6, grip: 15, mass: 0.6,
-    unlock: { km: 130, cp: 9 },
+    unlock: { km: 220, cp: 10 },
     shape: { type: "wedge", L: 4.5, W: 1.98, H: 1.16, belt: 0.74, clr: 0.11, nose: 0.42, cabin: [0.3, 0.72], ws: 0.25, wheel: 0.35 } },
   { id: "fulmine", name: "Fulmine", kind: "Hypercar", top: 330, acc: 2.9, grip: 16, mass: 0.6,
-    unlock: { km: 180, cp: 11 },
+    unlock: { km: 300, cp: 12 },
     shape: { type: "wedge", L: 4.65, W: 2.02, H: 1.1, belt: 0.7, clr: 0.1, nose: 0.36, cabin: [0.33, 0.7], ws: 0.27, wheel: 0.36 } },
   { id: "faro", name: "Faro", kind: "Prototipo", top: 360, acc: 2.5, grip: 18, mass: 0.7,
-    unlock: { km: 250, cp: 13 },
+    unlock: { km: 400, cp: 14 },
     shape: { type: "proto", L: 4.8, W: 2.0, H: 1.04, belt: 0.62, clr: 0.09, nose: 0.3, cabin: [0.36, 0.66], ws: 0.25, wheel: 0.36 } }
 ];
 export const carById = (id) => CARS.find((c) => c.id === id) || CARS[0];
@@ -133,7 +133,7 @@ export const TRACKS = [
 ];
 export const trackById = (id) => TRACKS.find((t) => t.id === id) || TRACKS[0];
 
-export const cpBonus = (k, track) => Math.max(14, 26 - k) + (track.cpExtra || 0);
+export const cpBonus = (k, track) => Math.max(12, 26 - 2 * k) + (track.cpExtra || 0);
 
 // ---------------------------------------------------------------- unlocks
 export function bestCpAny(profile) {
@@ -179,4 +179,4 @@ export function ownsPart(profile, car, key, opt) {
   const list = (profile && profile.owned && profile.owned.parts && profile.owned.parts[car.id]) || [];
   return list.includes(`${key}:${opt}`);
 }
-export const coinsEarned = (distance, coins) => Math.floor(distance / 10) + 5 * coins;
+export const coinsEarned = (distance, coins) => Math.floor(distance / 25) + 2 * coins;
