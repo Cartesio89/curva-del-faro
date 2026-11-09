@@ -288,9 +288,11 @@ export class World {
     this.cpIndex = 0;
     this.itemGap = 220;
     this.lastWarnS = -999;
-    this.ensure(1500);
+    this.init();
   }
 
+  init() { this.ensure(1500); }
+  blocked() { return false; }
   difficulty(s) { return clamp(s / 9000, 0, 1); }
   get length() { return (this.k.length) * SEG_L; }
 
@@ -381,9 +383,11 @@ export class World {
   // Sample the road at distance s, lateral offset x (positive = right).
   sample(s, x = 0, out = {}) {
     const n = this.k.length;
-    let i = Math.floor(s / SEG_L);
+    const SL = this.segL || SEG_L;
+    if (this.loopL) s = ((s % this.loopL) + this.loopL) % this.loopL;
+    let i = Math.floor(s / SL);
     i = clamp(i, 0, n - 1);
-    const f = clamp(s / SEG_L - i, 0, 1);
+    const f = clamp(s / SL - i, 0, 1);
     const th = this.th[i] + (this.th[i + 1] - this.th[i]) * f;
     const cx = this.px[i] + (this.px[i + 1] - this.px[i]) * f;
     const cz = this.pz[i] + (this.pz[i + 1] - this.pz[i]) * f;
@@ -393,7 +397,7 @@ export class World {
     out.z = cz + Math.sin(th) * x;
     out.y = y;
     out.heading = th;
-    out.slope = Math.atan2(this.py[i + 1] - y0, SEG_L);
+    out.slope = Math.atan2(this.py[i + 1] - y0, SL);
     out.k = this.k[i];
     return out;
   }
@@ -465,7 +469,7 @@ export class World {
     const col = colorFn ? new Float32Array(rows * cols * 3) : null;
     const tmp = {};
     for (let r = 0; r < rows; r++) {
-      const s = s0 + r * SEG_L;
+      const s = s0 + r * ((s1 - s0) / (rows - 1));
       for (let c = 0; c < cols; c++) {
         const x = offsets[c];
         this.sample(s, x, tmp);
@@ -490,7 +494,7 @@ export class World {
   }
 
   buildChunk(c) {
-    const s0 = c * CHUNK * SEG_L, s1 = s0 + CHUNK * SEG_L;
+    const s0 = c * CHUNK * SEG_L, s1 = Math.min(s0 + CHUNK * SEG_L, this.loopL || Infinity);
     const grp = new THREE.Group();
     const owned = [];
     const tr = this.track;
@@ -511,7 +515,7 @@ export class World {
     };
     const yFn = (s, x, y) => (Math.abs(x) <= ROAD_HALF + KERB + 0.01 ? y - 0.02 : this.terrainY(s, x) - 0.03);
     for (const side of [-1, 1]) {
-      const raw = [ROAD_HALF + KERB, ROAD_HALF + 4, ROAD_HALF + 12, ROAD_HALF + VERGE, ROAD_HALF + 70, ROAD_HALF + 160, OUTER];
+      const raw = this.groundRaw || [ROAD_HALF + KERB, ROAD_HALF + 4, ROAD_HALF + 12, ROAD_HALF + VERGE, ROAD_HALF + 70, ROAD_HALF + 160, OUTER];
       const offs = side > 0 ? raw.slice().reverse() : raw.map((v) => -v);
       const gm = new THREE.Mesh(this.ribbon(s0, s1, offs, () => 0, 10, yFn, colorFn), this.groundMat);
       gm.receiveShadow = true; grp.add(gm); owned.push(gm.geometry);
@@ -533,7 +537,7 @@ export class World {
       return M(tmp.x, this.terrainY(s, x) - 0.05, tmp.z, sc, ySc, sc, tmp.heading + ry);
     };
     const lists = {};
-    const push = (k, m) => (lists[k] || (lists[k] = [])).push(m);
+    const push = (k, m) => { if (this.blocked(m.elements[12], m.elements[14], k)) return; (lists[k] || (lists[k] = [])).push(m); };
     const scen = tr.scenery;
     const rand = mulberry(c * 9973 + 17);
     if (scen.includes("post")) for (let s = s0; s < s1; s += 20) { push("post", at(s, ROAD_HALF + 1.2)); push("post", at(s, -ROAD_HALF - 1.2)); }
@@ -626,4 +630,64 @@ function mulberry(a) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+// ------------------------------------------------------------------ closed circuits
+// Same road engine, but the centreline is a closed spline built once, the ground is a flat plane
+// and the whole lap is meshed up front.
+export class CircuitWorld extends World {
+  init() {
+    const c = this.track.circuit;
+    const curve = new THREE.CatmullRomCurve3(c.pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), true, "centripetal");
+    const L = curve.getLength();
+    const n = Math.round(L / SEG_L);
+    const P = curve.getSpacedPoints(n);          // n+1 points, last == first
+    this.loopL = L;
+    this.segL = L / n;
+    this.px = []; this.pz = []; this.py = []; this.th = []; this.k = [];
+    for (let i = 0; i <= n; i++) { this.px.push(P[i].x); this.pz.push(P[i].z); this.py.push(0); }
+    let prev = null;
+    for (let i = 0; i <= n; i++) {
+      const a = P[i % n], b = P[(i + 1) % n];
+      let h = Math.atan2(b.x - a.x, b.z - a.z);
+      if (prev !== null) h = prev + Math.atan2(Math.sin(h - prev), Math.cos(h - prev));
+      this.th.push(h); prev = h;
+    }
+    for (let i = 0; i < n; i++) this.k.push(-(this.th[i + 1] - this.th[i]) / this.segL);
+    this.groundRaw = [ROAD_HALF + KERB, ROAD_HALF + 4, ROAD_HALF + 14];
+    // chevrons on the outside of tight corners
+    for (let i = 0; i < n; i += 6) {
+      const k = this.k[i];
+      if (Math.abs(k) > 1 / 70) this.signs.push({ s: i * this.segL, x: -Math.sign(k) * (ROAD_HALF + 2.2), kind: "chevron", dir: Math.sign(k) });
+    }
+    this.centre = P.filter((_, i) => i % 3 === 0);
+    // flat ground under everything
+    let cx = 0, cz = 0;
+    for (const p of P) { cx += p.x; cz += p.z; }
+    cx /= P.length; cz /= P.length;
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(3000, 48), new THREE.MeshStandardMaterial({ color: this.track.ground, roughness: 1 }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(cx, -0.07, cz);
+    ground.receiveShadow = true;
+    this.root.add(ground);
+    this.built = false;
+  }
+  get length() { return this.loopL; }
+  ensure() {}
+  placeItems() {}
+  terrainY() { return 0; }
+  cpS(k) { return k === 0 ? 1 : 1e12; }
+  cpAround() { return 0; }
+  blocked(x, z, kind) {
+    const margin = kind === "building" ? ROAD_HALF + 12 : kind === "post" || kind === "lamp" || kind === "lampHead" ? 0 : ROAD_HALF + 3.5;
+    if (!margin) return false;
+    for (const p of this.centre) { const dx = p.x - x, dz = p.z - z; if (dx * dx + dz * dz < margin * margin) return true; }
+    return false;
+  }
+  update() {
+    if (this.built) return;
+    const chunks = Math.ceil(this.loopL / (CHUNK * SEG_L));
+    for (let c = 0; c < chunks; c++) this.chunks.set(c, this.buildChunk(c));
+    this.built = true;
+  }
 }

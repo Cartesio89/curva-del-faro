@@ -1,10 +1,12 @@
 import * as THREE from "three";
 import {
   CARS, TRACKS, PARTS, PART_ORDER, COLORS, carById, trackById, cleanConfig, performance as perfOf,
-  carUnlocked, trackUnlocked, unlockText, priceOf, ownsCar, ownsPart, coinsEarned
+  carUnlocked, trackUnlocked, unlockText, priceOf, ownsCar, ownsPart, coinsEarned,
+  CIRCUITS, circuitById, circuitUnlocked, prizeFor
 } from "./data.js";
 import { api, ERRORS } from "./api.js";
 import { Race } from "./race.js";
+import { CircuitRace, fmtLap } from "./circuit.js";
 import { Showroom } from "./showroom.js";
 
 const $ = (id) => document.getElementById(id);
@@ -65,7 +67,7 @@ function cfgFor(car) {
 let preview = null; // {car, key, value} — an option shown in the garage before buying it
 const selCar = () => { const c = carById(garage.sel); return carUnlocked(c, profile) && ownsCar(profile, c) ? c : CARS[0]; };
 const selTrack = () => { const t = trackById(garage.track); return trackUnlocked(t, profile) ? t : TRACKS[0]; };
-const SCREENS = ["scrLogin", "scrHome", "scrGarage", "scrTracks", "scrBoard", "scrPause", "scrOver"];
+const SCREENS = ["scrLogin", "scrHome", "scrGarage", "scrTracks", "scrCircuits", "scrBoard", "scrPause", "scrOver"];
 function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; }
 
 function setProfile(p, keepGarage) {
@@ -159,6 +161,7 @@ function goHome() {
 $("goRace").addEventListener("click", () => startRace());
 $("goGarage").addEventListener("click", () => openGarage());
 $("goTracks").addEventListener("click", () => openTracks());
+$("goCircuits").addEventListener("click", () => openCircuits());
 $("goBoard").addEventListener("click", () => openBoard(selTrack().id));
 $("goLogout").addEventListener("click", async () => {
   if (token) api.logout(token);
@@ -331,36 +334,119 @@ function openTracks() {
 $("tBack").addEventListener("click", goHome);
 
 // ------------------------------------------------------------------ leaderboard
-function renderBoard(ol, rows, highlightName) {
+function renderBoard(ol, rows, highlightName, laps) {
   ol.textContent = "";
   const li0 = (text) => { const li = document.createElement("li"); li.className = "empty"; li.textContent = text; ol.appendChild(li); };
   if (!Array.isArray(rows)) return li0("Classifica non raggiungibile in questo momento.");
-  if (!rows.length) return li0("Ancora nessun tempo su questa pista. Il primo posto è libero.");
+  if (!rows.length) return li0(laps ? "Ancora nessun giro registrato. Il primo posto è libero." : "Ancora nessun tempo su questa pista. Il primo posto è libero.");
   rows.forEach((r, i) => {
     const li = document.createElement("li");
     if (highlightName && r.name.toLowerCase() === highlightName.toLowerCase()) li.className = "me";
     const pos = document.createElement("span"); pos.className = "pos"; pos.textContent = i + 1;
     const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = r.name;
     const car = document.createElement("small"); car.textContent = carById(r.car).name; nm.appendChild(car);
-    const m = document.createElement("span"); m.className = "m"; m.textContent = fmtM(r.distance_m);
-    const t = document.createElement("span"); t.className = "t"; t.textContent = Math.round(r.time_s) + " s";
+    const m = document.createElement("span"); m.className = "m";
+    const t = document.createElement("span"); t.className = "t";
+    if (laps) { m.textContent = fmtLap(Number(r.best_lap)); t.textContent = `${r.position}° pos.`; }
+    else { m.textContent = fmtM(r.distance_m); t.textContent = Math.round(r.time_s) + " s"; }
     li.append(pos, nm, m, t); ol.appendChild(li);
   });
 }
-async function openBoard(trackId) {
+async function openBoard(id) {
   const tabs = $("boardTabs"); tabs.textContent = "";
-  for (const t of TRACKS) {
+  const all = [...TRACKS.map((t) => ({ id: t.id, name: t.name, laps: false })), ...CIRCUITS.map((c) => ({ id: c.id, name: "Gara: " + c.name, laps: true }))];
+  const cur = all.find((x) => x.id === id) || all[0];
+  for (const t of all) {
     const b = document.createElement("button");
-    b.className = "tab" + (t.id === trackId ? " on" : ""); b.textContent = t.name; b.setAttribute("role", "tab");
+    b.className = "tab" + (t.id === cur.id ? " on" : ""); b.textContent = t.name; b.setAttribute("role", "tab");
     b.addEventListener("click", () => openBoard(t.id));
     tabs.appendChild(b);
   }
   show("scrBoard");
   const ol = $("boardList");
   ol.innerHTML = '<li class="empty">Carico…</li>';
-  renderBoard(ol, await api.top(trackId), profile && profile.name);
+  renderBoard(ol, cur.laps ? await api.topLaps(cur.id) : await api.top(cur.id), profile && profile.name, cur.laps);
 }
 $("bBack").addEventListener("click", goHome);
+
+// ------------------------------------------------------------------ circuits
+function openCircuits() {
+  const list = $("circuitList"); list.textContent = "";
+  for (const c of CIRCUITS) {
+    const ok = circuitUnlocked(c, profile);
+    const t = trackById(c.theme);
+    const b = document.createElement("button");
+    b.className = "track"; b.disabled = !ok;
+    const sw = document.createElement("span"); sw.className = "sw-big";
+    sw.style.background = `linear-gradient(180deg, ${t.sky[0]}, ${t.sky[1]} 55%, ${t.ground} 56%, ${t.road})`;
+    const txt = document.createElement("span");
+    const name = document.createElement("b"); name.textContent = `${c.name} · ${c.laps} giri`;
+    const d = document.createElement("span");
+    const rec = profile.circuits && profile.circuits[c.id];
+    const prev = CIRCUITS[CIRCUITS.indexOf(c) - 1];
+    d.textContent = ok
+      ? `${c.desc} Premio al 1°: ${fmtC(prizeFor(c, 1))}.${rec ? ` Miglior arrivo ${rec.best_pos}°, giro ${fmtLap(Number(rec.best_lap))}.` : ""}`
+      : `Bloccato: arriva tra i primi 3 a ${prev.name}.`;
+    txt.append(name, d); b.append(sw, txt);
+    b.addEventListener("click", () => startCircuit(c));
+    list.appendChild(b);
+  }
+  show("scrCircuits");
+}
+$("cBack").addEventListener("click", goHome);
+const circuitHooks = {
+  onToast: (text, kind) => toast(text, kind),
+  onCountdown: (label) => { const h = $("hint"); h.textContent = label; h.className = "hint count"; h.hidden = false; },
+  onStart: () => { setTimeout(() => { if (race && race.meta.kind === "circuit") $("hint").hidden = true; }, 700); },
+  onFinish: (st) => { mode = "over"; clearInput(); finishCircuit(st); }
+};
+function setHudLabels(circuit) {
+  $("lblDist").textContent = circuit ? "Posizione" : "Percorsi";
+  $("lblTime").textContent = circuit ? "Giro" : "Tempo";
+  $("cpChip").hidden = circuit; $("lapChip").hidden = !circuit; $("cCoins").hidden = circuit;
+  const h = $("hint"); h.className = "hint"; h.textContent = "Tieni premuto GAS";
+}
+function startCircuit(c) {
+  endRace();
+  const car = selCar();
+  race = new CircuitRace(renderer, trackById(c.theme), c, car, cfgFor(car), circuitHooks, { mobile, playerName: profile.name });
+  race.setAspect(W, H);
+  race.meta = { car, circuit: c, kind: "circuit" };
+  setHudLabels(true);
+  mode = "race";
+  show(null);
+  $("raceUi").hidden = false;
+  clearInput();
+}
+async function finishCircuit(st) {
+  const { car, circuit } = race.meta;
+  const beforeNext = CIRCUITS.filter((c) => circuitUnlocked(c, profile)).map((c) => c.id);
+  $("oTitle").textContent = st.position === 1 ? "Vittoria!" : st.position <= 3 ? "Sul podio!" : "Gara finita";
+  $("oDist").textContent = `${st.position}°`; $("oUnit").textContent = `su ${st.total}`;
+  $("oL1").textContent = "Tempo"; $("oTime").textContent = fmtLap(st.time);
+  $("oL2").textContent = "Giro migliore"; $("oCp").textContent = fmtLap(st.best);
+  $("oL3").textContent = "Contatti"; $("oNear").textContent = st.contacts;
+  $("oL4").textContent = "Premio"; $("oHit").textContent = fmtC(prizeFor(circuit, st.position));
+  const ord = $("oOrder"); ord.textContent = ""; ord.hidden = false;
+  st.order.forEach((o, i) => { const li = document.createElement("li"); if (o.isPlayer) li.className = "me"; const b = document.createElement("b"); b.textContent = `${i + 1}.`; li.append(b, document.createTextNode(o.name)); ord.appendChild(li); });
+  $("oUnlocks").textContent = "";
+  $("oBoardTitle").textContent = `Giri più veloci · ${circuit.name}`;
+  $("oBoard").innerHTML = "";
+  show("scrOver");
+  $("again").focus({ preventScroll: true });
+  const save = $("oSave");
+  save.textContent = "Salvo la gara…";
+  const r = await api.submitCircuit(token, circuit.id, car.id, st.position, Math.round(st.time * 10) / 10, Math.round(st.best * 10) / 10);
+  if (r && r.profile) {
+    setProfile(r.profile, true);
+    save.textContent = `Salvata: +${fmtC(r.earned)}. Il tuo giro migliore è ${r.lap_rank}° in classifica.`;
+    for (const c of CIRCUITS) if (!beforeNext.includes(c.id) && circuitUnlocked(c, profile)) { const d = document.createElement("div"); d.textContent = `Nuovo circuito sbloccato: ${c.name}`; $("oUnlocks").appendChild(d); }
+  } else {
+    save.textContent = ERRORS[r && r.error] || "Gara non salvata.";
+    if (r && r.error === "no_session") { token = null; store.del("faro-token"); }
+  }
+  renderBoard($("oBoard"), await api.topLaps(circuit.id), profile && profile.name, true);
+}
 
 // ------------------------------------------------------------------ race
 const hooks = {
@@ -373,7 +459,8 @@ function startRace() {
   const car = selCar(), track = selTrack();
   race = new Race(renderer, track, car, cfgFor(car), hooks, { mobile });
   race.setAspect(W, H);
-  race.meta = { car, track };
+  race.meta = { car, track, kind: "endless" };
+  setHudLabels(false);
   mode = "race";
   show(null);
   $("raceUi").hidden = false;
@@ -389,7 +476,9 @@ async function finishRun(st) {
   const { car, track } = race.meta;
   const before = { cars: CARS.filter((c) => carUnlocked(c, profile)).map((c) => c.id), tracks: TRACKS.filter((t) => trackUnlocked(t, profile)).map((t) => t.id) };
   $("oTitle").textContent = "Tempo scaduto";
-  $("oDist").textContent = st.distance.toLocaleString("it-IT");
+  $("oDist").textContent = st.distance.toLocaleString("it-IT"); $("oUnit").textContent = "m";
+  $("oL1").textContent = "Tempo"; $("oL2").textContent = "Traguardi"; $("oL3").textContent = "Scarti"; $("oL4").textContent = "Botti";
+  $("oOrder").hidden = true;
   $("oTime").textContent = Math.round(st.time) + " s";
   $("oCp").textContent = st.cps; $("oNear").textContent = st.near; $("oHit").textContent = st.crashes;
   $("oUnlocks").textContent = "";
@@ -420,7 +509,10 @@ function resume() { if (mode !== "paused") return; show(null); mode = "race"; }
 $("pauseBtn").addEventListener("click", pause);
 $("resume").addEventListener("click", resume);
 $("quit").addEventListener("click", goHome);
-$("again").addEventListener("click", () => { if (!token) { showLogin(ERRORS.no_session); return; } startRace(); });
+$("again").addEventListener("click", () => {
+  if (!token) { showLogin(ERRORS.no_session); return; }
+  if (race && race.meta.kind === "circuit") startCircuit(race.meta.circuit); else startRace();
+});
 $("toBox").addEventListener("click", () => { if (!token) { showLogin(ERRORS.no_session); return; } goHome(); });
 document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
 
@@ -434,6 +526,16 @@ function toast(text, kind) {
 }
 function updateHud() {
   const h = race.hud();
+  if (h.circuit) {
+    el.spd.textContent = h.kmh;
+    el.dst.textContent = `${h.pos}°`; $("emDist").textContent = `/${h.total}`;
+    el.tim.textContent = `${h.lap}`; $("emTime").textContent = `/${h.laps}`;
+    $("lapChip").textContent = `Giro ${fmtLap(h.lapTime)} · Migliore ${fmtLap(h.best)}`;
+    el.gT.classList.remove("low"); el.gS.classList.remove("turbo");
+    el.turbo.hidden = true; el.shield.hidden = true; el.oil.hidden = true; el.off.hidden = !h.off;
+    return;
+  }
+  $("emDist").textContent = "m"; $("emTime").textContent = "s";
   el.coins.textContent = fmtC(h.coins);
   el.spd.textContent = h.kmh; el.dst.textContent = h.dist; el.tim.textContent = h.time.toFixed(1); el.cp.textContent = h.toCp;
   el.gT.classList.toggle("low", h.state === "run" && h.time < 5);
@@ -502,5 +604,5 @@ window.__faro = {
   get mode() { return mode; }, input,
   get race() { return race; },
   fakeLogin(p) { token = "test"; setProfile(p); goHome(); },
-  startRace, openGarage, openTracks
+  startRace, openGarage, openTracks, startCircuit: (id) => startCircuit(circuitById(id))
 };

@@ -180,3 +180,28 @@ export function ownsPart(profile, car, key, opt) {
   return list.includes(`${key}:${opt}`);
 }
 export const coinsEarned = (distance, coins) => Math.floor(distance / 25) + 2 * coins;
+
+// ---------------------------------------------------------------- circuits (closed tracks, races against AI)
+// pts: control points of a closed centripetal Catmull-Rom spline (metres, flat). Lengths are checked on the server.
+export const CIRCUITS = [
+  { id: "porto", name: "Anello del Porto", theme: "costiera", laps: 3, mult: 1, desc: "Veloce e scorrevole, curve ampie.",
+    pts: [[0,0],[300,0],[480,40],[560,180],[520,330],[380,400],[150,410],[-60,380],[-160,260],[-150,100]] },
+  { id: "vigna", name: "Vigna", theme: "colline", laps: 3, mult: 1.25, desc: "Una chicane e un tornante tra i filari.",
+    pts: [[0,0],[250,-30],[420,40],[470,200],[380,300],[260,260],[180,330],[200,480],[60,560],[-120,500],[-180,330],[-110,160]] },
+  { id: "passo", name: "Passo", theme: "montagna", laps: 3, mult: 1.5, desc: "Neve e curve strette: poca aderenza.",
+    pts: [[0,0],[180,0],[260,90],[200,190],[280,280],[420,260],[500,360],[430,480],[280,520],[120,470],[60,360],[-60,320],[-120,200],[-80,80]] },
+  { id: "mesa", name: "Mesa", theme: "canyon", laps: 2, mult: 1.75, desc: "Rettilinei lunghissimi e tornanti.",
+    pts: [[0,0],[700,0],[820,80],[800,200],[650,240],[500,200],[380,260],[400,400],[300,480],[-200,480],[-300,380],[-250,250],[-120,200],[-150,80]] },
+  { id: "notte", name: "Notturno", theme: "citta", laps: 3, mult: 2, desc: "Cittadino a curve secche, di notte.",
+    pts: [[0,0],[300,0],[330,30],[330,200],[360,230],[520,230],[550,260],[550,420],[520,450],[100,450],[70,420],[70,300],[40,270],[-120,270],[-150,240],[-150,30],[-120,0]] }
+];
+export const circuitById = (id) => CIRCUITS.find((c) => c.id === id) || CIRCUITS[0];
+export const PRIZE = [400, 250, 150, 80, 50, 30];
+export const prizeFor = (circuit, pos) => Math.round(PRIZE[pos - 1] * circuit.mult);
+export function circuitUnlocked(circuit, profile) {
+  const i = CIRCUITS.indexOf(circuit);
+  if (i <= 0) return true;
+  const prev = profile && profile.circuits && profile.circuits[CIRCUITS[i - 1].id];
+  return !!prev && prev.best_pos <= 3;
+}
+export const AI_NAMES = ["Rossi", "Bianchi", "Ferro", "Greco", "Marino", "Costa", "Rizzo", "Galli", "Conti", "Gatti"];

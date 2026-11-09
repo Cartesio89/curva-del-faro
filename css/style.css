@@ -171,3 +171,9 @@ input:focus { outline: none; border-color: var(--amber); }
 .bar b small.down { color: #ff9b8c; }
 .bar { grid-template-columns: 72px minmax(0, 1fr) 82px; }
 .cmp { font-size: 13px !important; color: var(--ink-dim); margin: 0; }
+.wide { width: 100%; }
+.order { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 10px; font-size: 15px; }
+.order li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-dim); }
+.order li b { color: var(--ink); margin-right: 4px; }
+.order li.me { color: var(--amber); }
+.hint.count { font-family: var(--f-display); font-size: 64px; background: transparent; text-shadow: 0 4px 0 rgba(0,0,0,0.45); padding: 0; }

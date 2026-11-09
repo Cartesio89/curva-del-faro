@@ -31,7 +31,10 @@ export const api = {
   submitRun: (token, track, car, distance, time, cp, coins) =>
     rpc("faro_submit_run", { p_token: token, p_track: track, p_car: car, p_distance: distance, p_time: time, p_checkpoints: cp, p_coins: coins }),
   buy: (token, car, item) => rpc("faro_buy", { p_token: token, p_car: car, p_item: item }),
-  top: (track) => rpc("faro_top", { p_track: track })
+  top: (track) => rpc("faro_top", { p_track: track }),
+  submitCircuit: (token, circuit, car, position, time, bestLap) =>
+    rpc("faro_submit_circuit", { p_token: token, p_circuit: circuit, p_car: car, p_position: position, p_time: time, p_best_lap: bestLap }),
+  topLaps: (circuit) => rpc("faro_top_laps", { p_circuit: circuit })
 };
 
 export const ERRORS = {
@@ -47,5 +50,6 @@ export const ERRORS = {
   no_coins: "Monete insufficienti.",
   already_owned: "Ce l'hai già.",
   car_not_owned: "Prima devi comprare l'auto.",
-  bad_item: "Oggetto non in vendita."
+  bad_item: "Oggetto non in vendita.",
+  locked_circuit: "Circuito non ancora sbloccato."
 };

@@ -29,12 +29,13 @@
     <div id="raceUi" hidden>
       <div class="hud">
         <div class="gauge g-speed" id="gspd"><small>Velocità</small><strong id="spd">0</strong><em>km/h</em></div>
-        <div class="gauge g-dist"><small>Percorsi</small><strong id="dst">0</strong><em>m</em></div>
-        <div class="gauge g-time" id="gtime"><small>Tempo</small><strong id="tim">0</strong><em>s</em></div>
+        <div class="gauge g-dist"><small id="lblDist">Percorsi</small><strong id="dst">0</strong><em id="emDist">m</em></div>
+        <div class="gauge g-time" id="gtime"><small id="lblTime">Tempo</small><strong id="tim">0</strong><em id="emTime">s</em></div>
       </div>
       <div class="sub">
         <button class="chip chip-btn" id="pauseBtn" aria-label="Pausa">II</button>
-        <span class="chip cp">Traguardo tra <b id="cpLeft">0</b> m</span>
+        <span class="chip cp" id="cpChip">Traguardo tra <b id="cpLeft">0</b> m</span>
+        <span class="chip cp" id="lapChip" hidden></span>
         <span class="chip coins" id="cCoins">0 M</span>
         <span class="chip turbo" id="cTurbo" hidden>Turbo</span>
         <span class="chip shield" id="cShield" hidden>Scudo</span>
@@ -82,6 +83,7 @@
         <div><small>Record qui</small><b id="homeBest">—</b></div>
       </div>
       <button class="go big-go" id="goRace">Corri</button>
+      <button class="ghost wide" id="goCircuits">Gare in pista</button>
       <div class="menu-grid">
         <button class="ghost" id="goGarage">Garage</button>
         <button class="ghost" id="goTracks">Piste</button>
@@ -115,6 +117,14 @@
       <div class="actions"><button class="ghost" id="tBack">Box</button></div>
     </section>
 
+    <!-- ===== Circuits ===== -->
+    <section class="card center-card" id="scrCircuits" hidden>
+      <h2>Gare in pista</h2>
+      <p class="note">Tu contro 5 piloti. Arriva tra i primi 3 per sbloccare il circuito successivo.</p>
+      <div class="track-list" id="circuitList"></div>
+      <div class="actions"><button class="ghost" id="cBack">Box</button></div>
+    </section>
+
     <!-- ===== Leaderboard ===== -->
     <section class="card center-card" id="scrBoard" hidden>
       <h2>Top 10</h2>
@@ -132,14 +142,15 @@
     <!-- ===== Game over ===== -->
     <section class="card center-card" id="scrOver" hidden>
       <h2 id="oTitle">Tempo scaduto</h2>
-      <div class="bignum"><span id="oDist">0</span><em>m</em></div>
+      <div class="bignum"><span id="oDist">0</span><em id="oUnit">m</em></div>
       <div class="stats">
-        <div><small>Tempo</small><b id="oTime">0 s</b></div>
-        <div><small>Traguardi</small><b id="oCp">0</b></div>
-        <div><small>Scarti</small><b id="oNear">0</b></div>
-        <div><small>Botti</small><b id="oHit">0</b></div>
+        <div><small id="oL1">Tempo</small><b id="oTime">0 s</b></div>
+        <div><small id="oL2">Traguardi</small><b id="oCp">0</b></div>
+        <div><small id="oL3">Scarti</small><b id="oNear">0</b></div>
+        <div><small id="oL4">Botti</small><b id="oHit">0</b></div>
       </div>
       <div class="save" id="oSave"></div>
+      <ol class="order" id="oOrder" hidden></ol>
       <div class="unlocks" id="oUnlocks"></div>
       <div class="actions"><button class="go" id="again">Riparti</button><button class="ghost" id="toBox">Box</button></div>
       <div class="board"><h3 id="oBoardTitle">Top 10</h3><ol id="oBoard"></ol></div>
