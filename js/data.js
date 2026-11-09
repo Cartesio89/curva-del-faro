@@ -5,7 +5,7 @@ export const LANE_W = 3.6;
 export const LANES = 3;
 export const ROAD_HALF = (LANE_W * LANES) / 2; // 5.4 m
 
-export const START_TIME = 26;
+export const START_TIME = 28;
 export const CP_FIRST = 600;
 export const CP_GAP = 1200;
 export const START_S = 60; // the car starts a bit down the road so there is tarmac behind the camera
@@ -133,7 +133,7 @@ export const TRACKS = [
 ];
 export const trackById = (id) => TRACKS.find((t) => t.id === id) || TRACKS[0];
 
-export const cpBonus = (k, track) => Math.max(12, 26 - 2 * k) + (track.cpExtra || 0);
+export const cpBonus = (k, track) => Math.max(12, 28 - 2 * k) + (track.cpExtra || 0);
 
 // ---------------------------------------------------------------- unlocks
 export function bestCpAny(profile) {

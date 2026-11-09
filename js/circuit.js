@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { CircuitWorld } from "./world.js";
 import { buildCar, disposeCar } from "./carmodel.js";
+import { stepCar, GRIP_ARCADE } from "./physics.js";
 import { CARS, COLORS, CIRCUITS, AI_NAMES, defaultConfig, performance, ROAD_HALF } from "./data.js";
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -37,11 +38,11 @@ export class CircuitRace {
 
     // cars: 5 AI on the first slots, the player starts last
     const pPerf = performance(car, cfg);
-    const level = [1.0, 1.02, 1.04, 1.06, 1.08][Math.max(0, CIRCUITS.indexOf(circuit))];
+    const level = [0.97, 0.99, 1.01, 1.03, 1.05][Math.max(0, CIRCUITS.indexOf(circuit))];
     const names = AI_NAMES.slice().sort(() => Math.random() - 0.5);
     this.cars = [];
     for (let j = 0; j < 5; j++) {
-      const rel = level * rnd(0.97, 1.04) * (j === 0 ? 1.03 : 1); // slot 0 is the pace-setter
+      const rel = level * rnd(0.98, 1.04) * (j === 0 ? 1.03 : 1); // slot 0 is the pace-setter
       const want = pPerf.topKmh * rel;
       const model = CARS.slice().sort((a, b) => Math.abs(a.top - want) - Math.abs(b.top - want))[0];
       const mcfg = { ...defaultConfig(model), color: COLORS[(j * 3 + 1) % COLORS.length], rims: ["razze", "multi", "pieni"][j % 3] };
@@ -50,7 +51,7 @@ export class CircuitRace {
       this.cars.push(this.makeCar({
         name: names[j], isPlayer: false, obj, len: model.shape.L, wid: model.shape.W,
         perf: { topMs: pPerf.topMs * rel, a0: pPerf.a0 * rel, grip: pPerf.grip * rnd(0.96, 1.04) },
-        skill: clamp(rnd(0.92, 1.0) + (j === 0 ? 0.02 : 0), 0.9, 1.03), aggr: rnd(0.3, 0.9), carId: model.id
+        skill: clamp(rnd(0.93, 0.99) + (j === 0 ? 0.03 : 0), 0.9, 1.02), aggr: rnd(0.3, 0.9), carId: model.id
       }, j));
     }
     const pObj = buildCar(car, cfg);
@@ -78,7 +79,7 @@ export class CircuitRace {
   makeCar(c, slot) {
     const row = Math.floor(slot / 2);
     return Object.assign(c, {
-      s: -7 - row * 9, x: slot % 2 ? 2.4 : -2.4, v: 0, latV: 0, yaw: 0,
+      s: -7 - row * 9, x: slot % 2 ? 2.4 : -2.4, v: 0, latV: 0, yaw: 0, phi: 0,
       lap: -1, lapStart: 0, lastLap: null, best: null, finished: false, finishTime: null
     });
   }
@@ -89,23 +90,20 @@ export class CircuitRace {
 
   // ------------------------------------------------------------------ driving
   drivePlayer(c, dt, input) {
-    const tr = this.track, p = c.perf, w = this.world;
-    const road = w.sample(c.s + 0.5);
-    const off = Math.abs(c.x) > ROAD_HALF + 0.6;
-    let a;
-    const top = p.topMs * this.draft(c);
-    if (input.brake) a = -12;
-    else if (input.gas) a = c.v < top ? p.a0 * Math.max(0.08, 1 - Math.pow(c.v / top, 1.8)) : -2;
-    else a = -(1.2 + 0.00045 * c.v * c.v);
-    if (off && c.v > p.topMs * tr.offroad) a -= 14;
-    c.v = clamp(c.v + a * dt, 0, top * 1.02);
-    const G = p.grip * tr.grip;
-    const aReq = c.v * c.v * road.k;
-    const drift = -Math.sign(aReq) * ((Math.abs(aReq) / G) * 2.6 + Math.max(0, Math.abs(aReq) - G) * 0.9);
-    const steerMax = 7 * clamp(c.v / 12, 0.25, 1) * (0.85 + 0.15 * Math.min(1.4, G / 12));
-    const steer = ((input.right ? 1 : 0) - (input.left ? 1 : 0)) * steerMax;
-    c.latV += (steer + drift - c.latV) * Math.min(1, dt * 10);
-    c.x = clamp(c.x + c.latV * dt, -(ROAD_HALF + 12), ROAD_HALF + 12);
+    const p = c.perf, tr = this.track;
+    const k = this.world.sample(c.s + 0.5).k;
+    const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    const st = stepCar(c, k, steer, { gas: input.gas, brake: input.brake, G: p.grip * tr.grip * GRIP_ARCADE,
+      top: p.topMs * this.draft(c), a0: p.a0, offroad: tr.offroad }, dt);
+    this.barrier(c);
+    return st.ds;
+  }
+
+  // gravel and tyre wall beyond the kerbs: heavy slowdown, the car cannot leave the circuit
+  barrier(c) {
+    const lim = ROAD_HALF + 5;
+    if (Math.abs(c.x) > ROAD_HALF + 2) c.v *= 0.985;
+    if (Math.abs(c.x) > lim) { c.x = Math.sign(c.x) * lim; c.phi *= -0.3; c.v *= 0.8; if (c.isPlayer && !this.wallCool) { this.shake = 0.4; this.wallCool = 1; this.hooks.onToast("Barriera!", "bad"); } }
   }
 
   // slipstream: +4 % top speed when tucked behind another car
@@ -118,70 +116,68 @@ export class CircuitRace {
     return 1;
   }
 
-  // AI: same grip limit a human can use (~1.3 × nominal), outside-inside-outside line,
-  // overtakes, blocks the car behind, slipstream, small mistakes and a light rubber band.
+  // AI: decides only gas, brake and steering; the car obeys the same physics as the player.
   driveAI(c, dt) {
     const w = this.world, tr = this.track, p = c.perf;
     const ahead = this.wrapDs(c.s - this.player.s);
     let band = 1;
-    if (!c.finished && this.state === "run") band = ahead < -60 ? 1.05 : ahead > 140 ? 0.97 : 1;
+    if (!c.finished && this.state === "run") band = ahead < -80 ? 1.04 : ahead > 160 ? 0.98 : 1;
     if (c.mistakeT > 0) c.mistakeT -= dt;
-    else if (Math.random() < dt * (1.1 - c.skill) * 0.06) { c.mistakeT = rnd(0.8, 1.6); c.mistakeKind = Math.random() < 0.5 ? "wide" : "early"; }
+    else if (this.state === "run" && Math.random() < dt * (1.06 - c.skill) * 0.08) { c.mistakeT = rnd(0.6, 1.2); c.mistakeKind = Math.random() < 0.5 ? "wide" : "early"; }
     const mist = c.mistakeT > 0 ? c.mistakeKind : null;
-    const Geff = p.grip * tr.grip * 1.3 * c.skill * (mist === "wide" ? 1.12 : 1);
-    const brake = 12 * c.skill;
+    const G = p.grip * tr.grip * GRIP_ARCADE;
+    const Gplan = G * c.skill * 0.97 * (mist === "wide" ? 1.15 : 1);
+    const brakeA = 11.5 * c.skill;
     const top = p.topMs * band * this.draft(c);
     let vt = top;
-    const k0 = Math.abs(w.sample(c.s).k);
-    if (k0 > 1e-4) vt = Math.min(vt, Math.sqrt(Geff / k0));
-    for (let d = 8; d <= 200; d += 12) {
+    for (let d = 0; d <= 220; d += 10) {
       const k = Math.abs(w.sample(c.s + d).k);
-      if (k > 1e-4) vt = Math.min(vt, Math.sqrt((Geff / k) * 0.98 + 2 * brake * d));
+      if (k > 1e-4) vt = Math.min(vt, Math.sqrt(Math.max(0, (Gplan / k) + 2 * brakeA * Math.max(0, d - 6))));
     }
-    if (mist === "early") vt *= 0.9;
-    const off = Math.abs(c.x) > ROAD_HALF + 0.6;
-    let a = 0;
-    if (c.v < vt - 0.4) a = p.a0 * band * Math.max(0.08, 1 - Math.pow(c.v / top, 1.8));
-    else if (c.v > vt + 0.8) a = -brake;
-    if (off && c.v > p.topMs * tr.offroad) a -= 14;
-    if (this.state === "finished" && c.finished) a = Math.min(a, c.v > 20 ? -3 : 0);
-    c.v = clamp(c.v + a * dt, 0, top * 1.02);
+    if (mist === "early") vt *= 0.92;
+    const gas = c.v < vt - 0.3;
+    const brake = c.v > vt + 1.2;
 
     // racing line: outside before a corner, inside at the apex
-    const kNow = w.sample(c.s + 6).k, kNext = w.sample(c.s + 55).k;
+    const kNow = w.sample(c.s + 8).k, kNext = w.sample(c.s + 60).k;
     let line = 0;
-    if (Math.abs(kNow) > 0.004) line = Math.sign(kNow) * Math.min(2.9, Math.abs(kNow) * 700);
-    else if (Math.abs(kNext) > 0.004) line = -Math.sign(kNext) * 2.6;
-    if (mist === "wide") line = -Math.sign(kNow || 1) * 4.6;
+    if (Math.abs(kNow) > 0.004) line = Math.sign(kNow) * Math.min(3.0, Math.abs(kNow) * 800);
+    else if (Math.abs(kNext) > 0.004) line = -Math.sign(kNext) * 2.8;
 
-    // overtake a slower car ahead, otherwise defend against a car close behind
-    let mode = "line";
+    // overtake slower cars; close the door only on the player (no fighting between AI cars)
     let blocker = null, chaser = null;
     for (const o of this.cars) {
       if (o === c) continue;
       const ds = this.wrapDs(o.s - c.s);
-      if (ds > 0 && ds < 22 && Math.abs(o.x - c.x) < 2.6 && o.v < c.v + 0.5 && (!blocker || ds < blocker.ds)) blocker = { o, ds };
-      if (ds < 0 && ds > -14 && o.v > c.v - 1.5 && (!chaser || ds > chaser.ds)) chaser = { o, ds };
+      if (ds > 0 && ds < 30 && Math.abs(o.x - c.x) < 2.4 && o.v < c.v + 1 && (!blocker || ds < blocker.ds)) blocker = { o, ds };
+      if (o.isPlayer && ds < 0 && ds > -16 && o.v > c.v - 2) chaser = { o, ds };
     }
+    let mode = "line";
     if (blocker) {
       const o = blocker.o;
-      if (!c.passSide || c.passT <= 0) { c.passSide = o.x > 0.5 ? -1 : o.x < -0.5 ? 1 : (Math.random() < 0.5 ? -1 : 1); c.passT = 2; }
-      line = clamp(o.x + c.passSide * 3.5, -(ROAD_HALF - 0.9), ROAD_HALF - 0.9);
+      if (!c.passSide || c.passT <= 0) {
+        const roomL = o.x - -(ROAD_HALF - 0.8), roomR = (ROAD_HALF - 0.8) - o.x;
+        c.passSide = roomR > roomL ? 1 : -1; c.passT = 2.5;
+      }
+      line = o.x + c.passSide * 3.4;
       mode = "pass";
-    } else if (chaser && this.state === "run" && c.aggr > 0.45) {
-      // close the door: move toward the chaser's line, one move at a time
-      if (c.blockT <= 0) { c.blockX = clamp(chaser.o.x, -2.8, 2.8); c.blockT = rnd(1.2, 2.2); }
+    } else if (chaser && this.state === "run" && c.aggr > 0.4) {
+      if (!(c.blockT > 0)) { c.blockX = clamp(chaser.o.x, -3, 3); c.blockT = rnd(1.4, 2.4); }
       line = c.blockX;
       mode = "block";
     }
     c.passT = (c.passT || 0) - dt;
     c.blockT = (c.blockT || 0) - dt;
     c.mode = mode;
-    line = clamp(line, -(ROAD_HALF - 0.7), ROAD_HALF - 0.7) + (mist === "wide" ? 0 : 0);
-    const maxLat = (mode === "line" ? 4.2 : 5.6) * clamp(c.v / 12, 0.3, 1);
-    const want = clamp((line - c.x) * 2.2, -maxLat, maxLat);
-    c.latV += (want - c.latV) * Math.min(1, dt * 6);
-    c.x = clamp(c.x + c.latV * dt, -(ROAD_HALF + 6), ROAD_HALF + 6);
+    line = clamp(line, -(ROAD_HALF - 0.8), ROAD_HALF - 0.8);
+    // steer toward the heading that reaches the line
+    const phiWant = clamp((line - c.x) * 0.1, -0.18, 0.18);
+    const steer = clamp((phiWant - c.phi) * 6, -1, 1);
+    let stopping = this.state === "finished" && c.finished && c.v > 15;
+    const st = stepCar(c, w.sample(c.s + 0.5).k, Math.abs(steer) < 0.02 ? 0 : steer,
+      { gas: gas && !stopping, brake: brake || stopping, G, top, a0: p.a0 * band, offroad: tr.offroad }, dt);
+    this.barrier(c);
+    return st.ds;
   }
 
   update(dt, input) {
@@ -196,10 +192,9 @@ export class CircuitRace {
     }
     this.t += dt;
     for (const c of this.cars) {
-      if (c.isPlayer && this.state === "run") this.drivePlayer(c, dt, input);
-      else this.driveAI(c, dt);
-      c.yaw += (clamp(-Math.atan2(c.latV, Math.max(c.v, 4)), -0.4, 0.4) - c.yaw) * Math.min(1, dt * 8);
-      c.s += c.v * dt;
+      const ds = c.isPlayer && this.state === "run" ? this.drivePlayer(c, dt, input) : this.driveAI(c, dt);
+      c.yaw = -c.phi;
+      c.s += ds;
       const lap = Math.floor(c.s / this.L);
       if (lap > c.lap) {
         if (lap >= 1 && !c.finished) {
@@ -243,6 +238,7 @@ export class CircuitRace {
         }
       }
     }
+    if (this.wallCool) this.wallCool = Math.max(0, this.wallCool - dt);
     if (this.contactCool) this.contactCool = Math.max(0, this.contactCool - dt);
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt);
   }

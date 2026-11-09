@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { World } from "./world.js";
+import { stepCar, GRIP_ARCADE } from "./physics.js";
 import { buildCar, trafficTemplatesFor, disposeCar } from "./carmodel.js";
 import { CARS, defaultConfig, performance, ROAD_HALF, LANE_W, START_TIME, CP_FIRST, CP_GAP, START_S, cpBonus } from "./data.js";
 
@@ -58,7 +59,7 @@ export class Race {
     this.timeLeft = START_TIME; this.elapsed = 0;
     this.cpReached = 0; this.near = 0; this.crashes = 0; this.coins = 0;
     this.turbo = 0; this.shield = 0; this.slip = 0; this.slipDir = 1; this.shake = 0;
-    this.yaw = 0; this.latV = 0;
+    this.yaw = 0; this.latV = 0; this.body = null;
     this.state = "ready";
     this.camHeading = 0;
     this.camPos = null;
@@ -94,35 +95,27 @@ export class Race {
     if (this.state === "ready" && input.gas) { this.state = "run"; this.hooks.onStart && this.hooks.onStart(); }
     const tr = this.track, p = this.perf;
     const road = this.world.sample(this.s + 0.5);
-    const off = Math.abs(this.x) > ROAD_HALF + 0.6;
     const top = p.topMs * (this.turbo > 0 ? 1.2 : 1);
-
-    // longitudinal
-    let a;
-    if (live && input.brake) a = -12;
-    else if (live && input.gas) a = this.v < top ? p.a0 * Math.max(0.08, 1 - Math.pow(this.v / top, 1.8)) * (this.turbo > 0 ? 1.6 : 1) : -2;
-    else a = -(1.2 + 0.00045 * this.v * this.v) * (this.state === "over" ? 4 : 1);
-    if (off && this.v > p.topMs * tr.offroad) a -= 14;
-    this.v = clamp(this.v + a * dt, 0, p.topMs * 1.25);
-
-    // lateral
-    const G = p.grip * tr.grip;
-    const aReq = this.v * this.v * road.k;                  // + = curve to the right
-    const over = Math.abs(aReq) / G;
-    const drift = -Math.sign(aReq) * (over * 2.6 + Math.max(0, Math.abs(aReq) - G) * 0.9);
     let steer = 0;
-    const steerMax = 7 * clamp(this.v / 12, 0.25, 1) * (0.85 + 0.15 * Math.min(1.4, G / 12));
     if (live) {
-      if (this.slip > 0) { this.slip -= dt; steer = this.slipDir * 6 * clamp(this.v / 20, 0.3, 1); }
-      else steer = ((input.right ? 1 : 0) - (input.left ? 1 : 0)) * steerMax;
+      if (this.slip > 0) { this.slip -= dt; steer = this.slipDir; }
+      else steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     }
-    const latTarget = steer + (this.state === "ready" ? 0 : drift);
-    this.latV += (latTarget - this.latV) * Math.min(1, dt * 10);
-    this.x = clamp(this.x + this.latV * dt, -(ROAD_HALF + 20), ROAD_HALF + 20);
-    // positive rotation turns the nose to the left, positive x is to the right: hence the minus
-    this.yaw += (clamp(-Math.atan2(this.latV, Math.max(this.v, 4)), -0.4, 0.4) - this.yaw) * Math.min(1, dt * 8);
-
-    this.s += this.v * dt;
+    const car = this.body || (this.body = { v: 0, x: 0, phi: 0, latV: 0 });
+    car.v = this.v; car.x = this.x;
+    const st = stepCar(car, road.k, steer, {
+      gas: live && input.gas, brake: live && input.brake,
+      G: p.grip * tr.grip * GRIP_ARCADE, top, a0: p.a0 * (this.turbo > 0 ? 1.6 : 1), offroad: tr.offroad,
+      coast: this.state === "over" ? 4 : 1
+    }, this.state === "ready" ? 0 : dt);
+    if (this.state === "ready") { car.v = 0; st.ds = 0; }
+    this.v = Math.min(car.v, p.topMs * 1.25);
+    this.x = clamp(car.x, -(ROAD_HALF + 20), ROAD_HALF + 20);
+    if (Math.abs(car.x) > ROAD_HALF + 20) car.phi *= 0.5;
+    this.latV = car.latV;
+    this.yaw = -car.phi; // positive rotation turns the nose left; phi > 0 points right
+    this.understeer = st.over;
+    this.s += st.ds;
     if (this.state !== "over") this.maxS = Math.max(this.maxS, this.s);
     if (this.turbo > 0) this.turbo = Math.max(0, this.turbo - dt);
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt);
