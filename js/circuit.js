@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { CircuitWorld } from "./world.js";
 import { buildCar, disposeCar } from "./carmodel.js";
-import { stepCar, GRIP_ARCADE } from "./physics.js";
+import { stepCar, smoothSteer, maxYaw, GRIP_ARCADE } from "./physics.js";
 import { CARS, COLORS, CIRCUITS, AI_NAMES, defaultConfig, performance, ROAD_HALF } from "./data.js";
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -92,8 +92,8 @@ export class CircuitRace {
   drivePlayer(c, dt, input) {
     const p = c.perf, tr = this.track;
     const k = this.world.sample(c.s + 0.5).k;
-    const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-    const st = stepCar(c, k, steer, { gas: input.gas, brake: input.brake, G: p.grip * tr.grip * GRIP_ARCADE,
+    c.steerSm = smoothSteer(c.steerSm || 0, (input.right ? 1 : 0) - (input.left ? 1 : 0), dt);
+    const st = stepCar(c, k, c.steerSm, { gas: input.gas, brake: input.brake, G: p.grip * tr.grip * GRIP_ARCADE,
       top: p.topMs * this.draft(c), a0: p.a0, offroad: tr.offroad }, dt);
     this.barrier(c);
     return st.ds;
@@ -170,11 +170,13 @@ export class CircuitRace {
     c.blockT = (c.blockT || 0) - dt;
     c.mode = mode;
     line = clamp(line, -(ROAD_HALF - 0.8), ROAD_HALF - 0.8);
-    // steer toward the heading that reaches the line
+    // the AI steers by hand too: yaw to follow the bend plus a correction toward its line
+    const kHere = w.sample(c.s + 0.5).k;
     const phiWant = clamp((line - c.x) * 0.1, -0.18, 0.18);
-    const steer = clamp((phiWant - c.phi) * 6, -1, 1);
+    const yawWant = c.v * kHere + (phiWant - c.phi) * 3;
+    const steer = clamp(yawWant / Math.max(1e-3, maxYaw(c.v, G)), -1, 1);
     let stopping = this.state === "finished" && c.finished && c.v > 15;
-    const st = stepCar(c, w.sample(c.s + 0.5).k, Math.abs(steer) < 0.02 ? 0 : steer,
+    const st = stepCar(c, kHere, steer,
       { gas: gas && !stopping, brake: brake || stopping, G, top, a0: p.a0 * band, offroad: tr.offroad }, dt);
     this.barrier(c);
     return st.ds;
@@ -277,7 +279,7 @@ export class CircuitRace {
     P.userData.tail.emissiveIntensity = this.state !== "run" || this.lastBrake ? 2.2 : 0.6;
     w.sample(this.player.s, this.player.x, tmp);
     if (this.camHeading === null) this.camHeading = tmp.heading;
-    this.camHeading += angDiff(tmp.heading + this.player.yaw * 0.3, this.camHeading) * Math.min(1, dtReal * 4);
+    this.camHeading += angDiff(tmp.heading + this.player.yaw * 0.65, this.camHeading) * Math.min(1, dtReal * 4);
     const dist = this.portrait ? 7.6 : 6.4, hgt = this.portrait ? 2.9 : 2.4;
     const dir = new THREE.Vector3(Math.sin(this.camHeading), 0, Math.cos(this.camHeading));
     const desired = new THREE.Vector3().copy(P.position).addScaledVector(dir, -dist);

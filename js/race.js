@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { World } from "./world.js";
-import { stepCar, GRIP_ARCADE } from "./physics.js";
+import { stepCar, smoothSteer, GRIP_ARCADE } from "./physics.js";
 import { buildCar, trafficTemplatesFor, disposeCar } from "./carmodel.js";
 import { CARS, defaultConfig, performance, ROAD_HALF, LANE_W, START_TIME, CP_FIRST, CP_GAP, START_S, cpBonus } from "./data.js";
 
@@ -59,7 +59,7 @@ export class Race {
     this.timeLeft = START_TIME; this.elapsed = 0;
     this.cpReached = 0; this.near = 0; this.crashes = 0; this.coins = 0;
     this.turbo = 0; this.shield = 0; this.slip = 0; this.slipDir = 1; this.shake = 0;
-    this.yaw = 0; this.latV = 0; this.body = null;
+    this.yaw = 0; this.latV = 0; this.body = null; this.steerSm = 0;
     this.state = "ready";
     this.camHeading = 0;
     this.camPos = null;
@@ -96,11 +96,13 @@ export class Race {
     const tr = this.track, p = this.perf;
     const road = this.world.sample(this.s + 0.5);
     const top = p.topMs * (this.turbo > 0 ? 1.2 : 1);
-    let steer = 0;
+    let steerTarget = 0;
     if (live) {
-      if (this.slip > 0) { this.slip -= dt; steer = this.slipDir; }
-      else steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+      if (this.slip > 0) { this.slip -= dt; steerTarget = this.slipDir * 0.6; }
+      else steerTarget = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     }
+    this.steerSm = smoothSteer(this.steerSm || 0, steerTarget, dt);
+    const steer = this.steerSm;
     const car = this.body || (this.body = { v: 0, x: 0, phi: 0, latV: 0 });
     car.v = this.v; car.x = this.x;
     const st = stepCar(car, road.k, steer, {
@@ -228,7 +230,7 @@ export class Race {
     // camera
     const heading = tmp.heading;
     w.sample(this.s, this.x, tmp);
-    this.camHeading += angDiff(tmp.heading + this.yaw * 0.3, this.camHeading) * Math.min(1, dtReal * 4);
+    this.camHeading += angDiff(tmp.heading + this.yaw * 0.65, this.camHeading) * Math.min(1, dtReal * 4);
     const dist = this.portrait ? 7.6 : 6.4, hgt = this.portrait ? 2.9 : 2.4;
     const dir = new THREE.Vector3(Math.sin(this.camHeading), 0, Math.cos(this.camHeading));
     const desired = new THREE.Vector3().copy(P.position).addScaledVector(dir, -dist);
