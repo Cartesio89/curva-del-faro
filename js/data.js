@@ -156,3 +156,27 @@ export function unlockText(item) {
   if (item.unlock) return `${item.unlock.cp} traguardi in una partita su ${trackById(item.unlock.track).name}`;
   return "";
 }
+
+// ---------------------------------------------------------------- coins (mirror of faro__catalog / faro__price on the server)
+export const CAR_PRICE = { lucciola: 0, gabbiano: 1500, delfino: 3000, medusa: 5000, cormorano: 7500, squalo: 10000, falco: 14000, orca: 19000, fulmine: 25000, faro: 33000 };
+const PART_BASE = { "gears:corti": 400, "gears:lunghi": 400, "tyres:dure": 300, "tyres:morbide": 500, "wing:basso": 300, "wing:alto": 600, "kit:sport": 600, "kit:corsa": 1200, "rims:multi": 200, "rims:pieni": 200 };
+const FREE = ["gears:std", "tyres:medie", "wing:nessuno", "kit:stradale", "rims:razze"];
+const WING_DEFAULT = ["orca", "fulmine", "faro"];
+const tierPrice = (base, idx) => Math.round((base * (1 + idx * 0.3)) / 10) * 10;
+
+export function priceOf(car, key, opt) {
+  const idx = CARS.indexOf(car);
+  if (key === "car") return CAR_PRICE[car.id];
+  const item = `${key}:${opt}`;
+  if (key === "color") return COLORS[idx % 10] === opt ? 0 : tierPrice(150, idx);
+  if (FREE.includes(item)) return 0;
+  if (item === "wing:basso" && WING_DEFAULT.includes(car.id)) return 0;
+  return PART_BASE[item] != null ? tierPrice(PART_BASE[item], idx) : null;
+}
+export const ownsCar = (profile, car) => car.id === "lucciola" || !!(profile && profile.owned && (profile.owned.cars || []).includes(car.id));
+export function ownsPart(profile, car, key, opt) {
+  if (priceOf(car, key, opt) === 0) return true;
+  const list = (profile && profile.owned && profile.owned.parts && profile.owned.parts[car.id]) || [];
+  return list.includes(`${key}:${opt}`);
+}
+export const coinsEarned = (distance, coins) => Math.floor(distance / 10) + 5 * coins;

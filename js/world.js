@@ -201,6 +201,16 @@ function sceneryKit(track) {
   }, false);
   kit.oilGeo = new THREE.PlaneGeometry(3.2, 3.2); kit.oilGeo.rotateX(-Math.PI / 2);
   kit.oilMat = new THREE.MeshStandardMaterial({ map: oilTex, transparent: true, roughness: 0.05, metalness: 0.4, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+  const coinFace = canvasTex(128, 128, (g, w, h) => {
+    g.fillStyle = "#f2b632"; g.fillRect(0, 0, w, h);
+    g.strokeStyle = "#c98a12"; g.lineWidth = 10; g.beginPath(); g.arc(64, 64, 52, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = "#8a5a06"; g.font = "bold 72px Arial Black, Impact, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("M", 64, 70);
+  }, false);
+  kit.coinGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.12, 20);
+  kit.coinGeo.rotateX(Math.PI / 2);
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xd99a1e, metalness: 0.8, roughness: 0.25, emissive: 0x3a2400 });
+  const faceMat = new THREE.MeshStandardMaterial({ map: coinFace, metalness: 0.6, roughness: 0.3, emissive: 0x2a1a00 });
+  kit.coinMat = [edgeMat, faceMat, faceMat];
   kit.icon = {};
   for (const t of ["clock", "turbo", "shield"]) {
     const tex = new THREE.CanvasTexture(iconTexture(t)); tex.colorSpace = THREE.SRGBColorSpace;
@@ -338,7 +348,7 @@ export class World {
   }
   placeItems(fromS, toS) {
     while (this.nextItemS === undefined || this.nextItemS < toS) {
-      if (this.nextItemS === undefined) this.nextItemS = START_S + 220;
+      if (this.nextItemS === undefined) this.nextItemS = START_S + 110;
       const s = this.nextItemS;
       const d = this.difficulty(s);
       const nearCp = this.cpS(this.cpAround(s)) - s;
@@ -349,7 +359,15 @@ export class World {
         for (const [t, w] of weights) if ((roll -= w) < 0) { type = t; break; }
         this.items.push({ s, x: pick([-LANE_W, 0, LANE_W]) + rnd(-0.4, 0.4), type, taken: false, obj: null });
       }
-      this.nextItemS += rnd(220, 520) / (1 + d * 0.6);
+      this.nextItemS += rnd(70, 160) / (1 + d * 0.6);
+    }
+    // rows of coins, a lane at a time
+    while (this.nextCoinS === undefined || this.nextCoinS < toS) {
+      if (this.nextCoinS === undefined) this.nextCoinS = START_S + 160;
+      const lane = pick([-LANE_W, 0, LANE_W]);
+      const n = 4 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < n; i++) this.items.push({ s: this.nextCoinS + i * 7, x: lane, type: "coin", taken: false, obj: null });
+      this.nextCoinS += n * 7 + rnd(110, 240);
     }
   }
   cpS(k) { return START_S + CP_FIRST + CP_GAP * k; }
@@ -423,6 +441,12 @@ export class World {
       }
       obj.position.set(p.x, p.y, p.z);
       obj.rotation.y = p.heading;
+    } else if (it.type === "coin") {
+      obj = new THREE.Mesh(this.kit.coinGeo, this.kit.coinMat);
+      obj.position.set(p.x, p.y + 0.85, p.z);
+      obj.rotation.y = p.heading;
+      obj.userData.baseY = p.y + 0.85;
+      obj.userData.coin = true;
     } else {
       obj = new THREE.Sprite(this.kit.icon[it.type]);
       obj.scale.set(1.5, 1.5, 1.5);

@@ -56,7 +56,7 @@ export class Race {
   reset() {
     this.s = START_S; this.x = 0; this.v = 0; this.maxS = START_S;
     this.timeLeft = START_TIME; this.elapsed = 0;
-    this.cpReached = 0; this.near = 0; this.crashes = 0;
+    this.cpReached = 0; this.near = 0; this.crashes = 0; this.coins = 0;
     this.turbo = 0; this.shield = 0; this.slip = 0; this.slipDir = 1; this.shake = 0;
     this.yaw = 0; this.latV = 0;
     this.state = "ready";
@@ -64,7 +64,7 @@ export class Race {
     this.camPos = null;
     for (const t of this.traffic) this.scene.remove(t.obj);
     this.traffic = [];
-    for (let i = 0; i < 4; i++) this.spawnTraffic(START_S + rnd(160, this.track.fogFar * 0.8));
+    for (let i = 0; i < 9; i++) this.spawnTraffic(START_S + rnd(120, this.track.fogFar * 0.85));
     this.world.update(this.s);
   }
 
@@ -119,7 +119,8 @@ export class Race {
     const latTarget = steer + (this.state === "ready" ? 0 : drift);
     this.latV += (latTarget - this.latV) * Math.min(1, dt * 10);
     this.x = clamp(this.x + this.latV * dt, -(ROAD_HALF + 20), ROAD_HALF + 20);
-    this.yaw += (clamp(Math.atan2(this.latV, Math.max(this.v, 4)), -0.4, 0.4) - this.yaw) * Math.min(1, dt * 8);
+    // positive rotation turns the nose to the left, positive x is to the right: hence the minus
+    this.yaw += (clamp(-Math.atan2(this.latV, Math.max(this.v, 4)), -0.4, 0.4) - this.yaw) * Math.min(1, dt * 8);
 
     this.s += this.v * dt;
     if (this.state !== "over") this.maxS = Math.max(this.maxS, this.s);
@@ -140,7 +141,7 @@ export class Race {
       // items
       for (const it of this.world.items) {
         if (it.taken || Math.abs(it.s - this.s) > 2.6) continue;
-        const reach = it.type === "cones" ? 2.0 : it.type === "oil" ? 1.9 : 1.6;
+        const reach = it.type === "cones" ? 2.0 : it.type === "oil" ? 1.9 : it.type === "coin" ? 1.5 : 1.6;
         if (Math.abs(it.x - this.x) < reach) { it.taken = true; this.applyItem(it.type); }
       }
       // traffic
@@ -168,14 +169,15 @@ export class Race {
       if (this.timeLeft <= 0) {
         this.timeLeft = 0;
         this.state = "over";
-        this.hooks.onFinish({ distance: Math.floor(this.maxS - START_S), time: this.elapsed, cps: this.cpReached, near: this.near, crashes: this.crashes });
+        this.hooks.onFinish({ distance: Math.floor(this.maxS - START_S), time: this.elapsed, cps: this.cpReached, near: this.near, crashes: this.crashes, coins: this.coins });
       }
     }
   }
 
   applyItem(type) {
     const h = this.hooks;
-    if (type === "clock") { this.timeLeft += 3; h.onToast("+3 s", "good"); }
+    if (type === "coin") { this.coins++; h.onCoin && h.onCoin(this.coins); }
+    else if (type === "clock") { this.timeLeft += 3; h.onToast("+3 s", "good"); }
     else if (type === "turbo") { this.turbo = 4; h.onToast("Turbo!", "good"); }
     else if (type === "shield") { this.shield = 1; h.onToast("Scudo attivo", "good"); }
     else if (type === "oil") { this.slip = 1.2; this.slipDir = Math.random() < 0.5 ? -1 : 1; h.onToast("Olio!", "bad"); }
@@ -184,8 +186,8 @@ export class Race {
 
   updateTraffic(dt) {
     const d = this.world.difficulty(this.s);
-    const want = Math.round((4 + d * 9) * this.track.traffic);
-    if (this.traffic.length < want && Math.random() < 0.05) this.spawnTraffic(this.s + rnd(this.track.fogFar * 0.65, this.track.fogFar * 0.95));
+    const want = Math.round((8 + d * 12) * this.track.traffic);
+    if (this.traffic.length < want && Math.random() < 0.1) this.spawnTraffic(this.s + rnd(this.track.fogFar * 0.55, this.track.fogFar * 0.95));
     for (const t of this.traffic) {
       t.s += t.v * dt;
       if ((t.laneT -= dt) <= 0) {
@@ -221,10 +223,14 @@ export class Race {
     for (const t of this.traffic) {
       w.sample(t.s, t.x, tmp);
       t.obj.position.set(tmp.x, tmp.y, tmp.z);
-      t.obj.rotation.set(-tmp.slope, tmp.heading + (t.target - t.x) * 0.04, 0, "YXZ");
+      t.obj.rotation.set(-tmp.slope, tmp.heading - (t.target - t.x) * 0.04, 0, "YXZ");
     }
     // pickups bob
-    for (const it of w.items) if (it.obj && it.obj.isSprite) it.obj.position.y = it.obj.userData.baseY + Math.sin(time * 0.004 + it.s) * 0.15;
+    for (const it of w.items) {
+      if (!it.obj) continue;
+      if (it.obj.isSprite) it.obj.position.y = it.obj.userData.baseY + Math.sin(time * 0.004 + it.s) * 0.15;
+      else if (it.obj.userData.coin) it.obj.rotation.y += dtReal * 3;
+    }
 
     // camera
     const heading = tmp.heading;
@@ -261,7 +267,7 @@ export class Race {
     const toCp = Math.max(0, Math.ceil(START_S + CP_FIRST + CP_GAP * this.cpReached - this.s));
     return {
       kmh: Math.round(this.v * 3.6), dist: Math.floor(this.maxS - START_S), time: this.timeLeft, toCp,
-      turbo: this.turbo, shield: this.shield > 0, slip: this.slip > 0 && this.state === "run",
+      coins: this.coins, turbo: this.turbo, shield: this.shield > 0, slip: this.slip > 0 && this.state === "run",
       off: this.state === "run" && Math.abs(this.x) > ROAD_HALF + 0.6, state: this.state
     };
   }

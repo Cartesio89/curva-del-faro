@@ -28,8 +28,9 @@ export const api = {
   profile: (token) => rpc("faro_profile", { p_token: token }),
   logout: (token) => rpc("faro_logout", { p_token: token }),
   saveGarage: (token, garage) => rpc("faro_save_garage", { p_token: token, p_garage: garage }),
-  submitRun: (token, track, car, distance, time, cp) =>
-    rpc("faro_submit_run", { p_token: token, p_track: track, p_car: car, p_distance: distance, p_time: time, p_checkpoints: cp }),
+  submitRun: (token, track, car, distance, time, cp, coins) =>
+    rpc("faro_submit_run", { p_token: token, p_track: track, p_car: car, p_distance: distance, p_time: time, p_checkpoints: cp, p_coins: coins }),
+  buy: (token, car, item) => rpc("faro_buy", { p_token: token, p_car: car, p_item: item }),
   top: (track) => rpc("faro_top", { p_track: track })
 };
 
@@ -42,5 +43,9 @@ export const ERRORS = {
   no_session: "Sessione scaduta: rientra con nome e PIN.",
   network: "Connessione assente o server non raggiungibile.",
   too_fast: "Partita troppo ravvicinata alla precedente: non salvata.",
-  implausible: "Risultato non plausibile: non salvato."
+  implausible: "Risultato non plausibile: non salvato.",
+  no_coins: "Monete insufficienti.",
+  already_owned: "Ce l'hai già.",
+  car_not_owned: "Prima devi comprare l'auto.",
+  bad_item: "Oggetto non in vendita."
 };

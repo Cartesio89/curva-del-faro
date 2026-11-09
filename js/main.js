@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import {
   CARS, TRACKS, PARTS, PART_ORDER, COLORS, carById, trackById, cleanConfig, performance as perfOf,
-  carUnlocked, trackUnlocked, unlockText
+  carUnlocked, trackUnlocked, unlockText, priceOf, ownsCar, ownsPart, coinsEarned
 } from "./data.js";
 import { api, ERRORS } from "./api.js";
 import { Race } from "./race.js";
@@ -17,6 +17,7 @@ const store = {
 };
 const fmtKm = (m) => ((m || 0) / 1000).toFixed((m || 0) < 10000 ? 1 : 0).replace(".", ",") + " km";
 const fmtM = (m) => (m || 0).toLocaleString("it-IT") + " m";
+const fmtC = (c) => (c || 0).toLocaleString("it-IT") + " M";
 
 // ------------------------------------------------------------------ renderer
 const canvas = $("view"), stage = $("stage");
@@ -54,8 +55,15 @@ let race = null;
 let garageIdx = 0;
 const input = { gas: false, brake: false, left: false, right: false };
 
-const cfgFor = (car) => cleanConfig(car, garage.cars[car.id]);
-const selCar = () => { const c = carById(garage.sel); return carUnlocked(c, profile) ? c : CARS[0]; };
+// saved configuration, restricted to what the player owns
+function cfgFor(car) {
+  const cfg = cleanConfig(car, garage.cars[car.id]);
+  const def = cleanConfig(car, null);
+  for (const k of [...PART_ORDER, "color"]) if (!ownsPart(profile, car, k, cfg[k])) cfg[k] = def[k];
+  return cfg;
+}
+let preview = null; // {car, key, value} — an option shown in the garage before buying it
+const selCar = () => { const c = carById(garage.sel); return carUnlocked(c, profile) && ownsCar(profile, c) ? c : CARS[0]; };
 const selTrack = () => { const t = trackById(garage.track); return trackUnlocked(t, profile) ? t : TRACKS[0]; };
 const SCREENS = ["scrLogin", "scrHome", "scrGarage", "scrTracks", "scrBoard", "scrPause", "scrOver"];
 function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; }
@@ -73,6 +81,7 @@ function setProfile(p, keepGarage) {
   $("who").hidden = false;
   $("whoName").textContent = p.name;
   $("whoKm").textContent = fmtKm(p.total_m);
+  $("whoCoins").textContent = fmtC(p.coins);
 }
 
 let saveTimer = 0;
@@ -137,9 +146,11 @@ function goHome() {
   $("homeTrack").textContent = track.name;
   const b = profile.best && profile.best[track.id];
   $("homeBest").textContent = b ? fmtM(b.best_m) : "—";
+  const buyable = CARS.filter((c) => carUnlocked(c, profile) && !ownsCar(profile, c));
   const nextCar = CARS.find((c) => !carUnlocked(c, profile));
   const nextTrack = TRACKS.find((t) => !trackUnlocked(t, profile));
   const bits = [];
+  if (buyable.length) bits.push(`Sbloccata da comprare: ${buyable[0].name}, ${fmtC(priceOf(buyable[0], "car"))}.`);
   if (nextCar) bits.push(`Prossima auto, ${nextCar.name}: ${unlockText(nextCar)}.`);
   if (nextTrack) bits.push(`Prossima pista, ${nextTrack.name}: ${unlockText(nextTrack)}.`);
   $("homeNext").textContent = bits.join(" ");
@@ -171,10 +182,14 @@ function statBar(label, value, frac, text) {
   row.append(a, t, b);
   return row;
 }
+let gAction = null;
 function renderGarage(rebuildModel) {
   const car = CARS[garageIdx];
   const locked = !carUnlocked(car, profile);
+  const owned = ownsCar(profile, car);
+  if (preview && preview.car !== car.id) preview = null;
   const cfg = cfgFor(car);
+  if (preview) cfg[preview.key] = preview.value;
   if (rebuildModel) showroom.setCar(car, cfg, locked);
   $("gName").textContent = car.name;
   $("gKind").textContent = `${garageIdx + 1}/10 · ${car.kind}`;
@@ -189,35 +204,55 @@ function renderGarage(rebuildModel) {
     statBar("Tenuta", p.grip, (p.grip - 8) / 14, (p.grip / 9.81).toFixed(2).replace(".", ",") + " g")
   );
   const parts = $("gParts"); parts.textContent = "";
-  for (const key of PART_ORDER) {
-    const part = PARTS[key];
-    const box = document.createElement("div"); box.className = "part";
-    const lab = document.createElement("small"); lab.textContent = part.label;
-    const opts = document.createElement("div"); opts.className = "opts";
-    for (const o of part.options) {
-      const b = document.createElement("button");
-      b.className = "opt" + (cfg[key] === o.id ? " on" : "");
-      b.textContent = o.label; b.disabled = locked;
-      b.addEventListener("click", () => { setPart(car, key, o.id); });
-      opts.appendChild(b);
+  const canEdit = !locked && owned;
+  const optButton = (key, value, label, isSwatch) => {
+    const b = document.createElement("button");
+    const have = ownsPart(profile, car, key, value);
+    const price = priceOf(car, key, value);
+    b.className = (isSwatch ? "sw" : "opt") + (cfg[key] === value ? " on" : "") + (have ? "" : " shop");
+    if (isSwatch) { b.style.background = value; b.setAttribute("aria-label", `Colore${have ? "" : ", " + fmtC(price)}`); }
+    else {
+      b.textContent = label;
+      if (!have) { const pr = document.createElement("small"); pr.textContent = fmtC(price); b.appendChild(pr); }
     }
+    b.disabled = !canEdit;
+    b.addEventListener("click", () => {
+      if (have) { preview = null; setPart(car, key, value); }
+      else { preview = { car: car.id, key, value, label: isSwatch ? "colore" : `${PARTS[key].label.toLowerCase()} ${label.toLowerCase()}` }; renderGarage(true); }
+    });
+    return b;
+  };
+  for (const key of PART_ORDER) {
+    const box = document.createElement("div"); box.className = "part";
+    const lab = document.createElement("small"); lab.textContent = PARTS[key].label;
+    const opts = document.createElement("div"); opts.className = "opts";
+    for (const o of PARTS[key].options) opts.appendChild(optButton(key, o.id, o.label, false));
     box.append(lab, opts); parts.appendChild(box);
   }
   const cbox = document.createElement("div"); cbox.className = "part";
   const clab = document.createElement("small"); clab.textContent = "Colore";
   const sws = document.createElement("div"); sws.className = "swatches";
-  for (const c of COLORS) {
-    const b = document.createElement("button");
-    b.className = "sw" + (cfg.color === c ? " on" : ""); b.style.background = c; b.disabled = locked;
-    b.setAttribute("aria-label", "Colore " + c);
-    b.addEventListener("click", () => setPart(car, "color", c));
-    sws.appendChild(b);
-  }
+  for (const c of COLORS) sws.appendChild(optButton("color", c, "", true));
   cbox.append(clab, sws); parts.appendChild(cbox);
-  const use = $("gUse");
-  if (locked) { use.textContent = "Bloccata"; use.disabled = true; }
-  else if (garage.sel === car.id) { use.textContent = "In uso"; use.disabled = true; }
-  else { use.textContent = "Usa questa auto"; use.disabled = false; }
+
+  const use = $("gUse"), msg = $("gMsg");
+  const coins = profile.coins || 0;
+  gAction = null; use.disabled = true;
+  if (locked) use.textContent = "Bloccata";
+  else if (!owned) {
+    const price = priceOf(car, "car");
+    use.textContent = `Compra l'auto · ${fmtC(price)}`;
+    gAction = { item: "car", price }; use.disabled = coins < price;
+  } else if (preview) {
+    const price = priceOf(car, preview.key, preview.value);
+    use.textContent = `Compra ${preview.label} · ${fmtC(price)}`;
+    gAction = { item: `${preview.key}:${preview.value}`, price, key: preview.key, value: preview.value }; use.disabled = coins < price;
+  } else if (garage.sel === car.id) use.textContent = "In uso";
+  else { use.textContent = "Usa questa auto"; use.disabled = false; gAction = { use: true }; }
+  if (gAction && gAction.price != null && coins < gAction.price) msg.textContent = `Hai ${fmtC(coins)}: ti mancano ${fmtC(gAction.price - coins)}.`;
+  else if (preview) msg.textContent = "Anteprima: le statistiche mostrano il pezzo prima di comprarlo.";
+  else msg.textContent = "";
+  msg.hidden = !msg.textContent;
 }
 function setPart(car, key, value) {
   const cfg = { ...cfgFor(car), [key]: value };
@@ -225,9 +260,27 @@ function setPart(car, key, value) {
   scheduleSave();
   renderGarage(true);
 }
-$("carPrev").addEventListener("click", () => { garageIdx = (garageIdx + CARS.length - 1) % CARS.length; renderGarage(true); });
-$("carNext").addEventListener("click", () => { garageIdx = (garageIdx + 1) % CARS.length; renderGarage(true); });
-$("gUse").addEventListener("click", () => { garage.sel = CARS[garageIdx].id; scheduleSave(); renderGarage(false); });
+$("carPrev").addEventListener("click", () => { preview = null; garageIdx = (garageIdx + CARS.length - 1) % CARS.length; renderGarage(true); });
+$("carNext").addEventListener("click", () => { preview = null; garageIdx = (garageIdx + 1) % CARS.length; renderGarage(true); });
+$("gUse").addEventListener("click", async () => {
+  const car = CARS[garageIdx];
+  if (!gAction) return;
+  if (gAction.use) { garage.sel = car.id; scheduleSave(); renderGarage(false); return; }
+  const use = $("gUse"); use.disabled = true; use.textContent = "Acquisto…";
+  const r = await api.buy(token, car.id, gAction.item);
+  if (r && r.profile) {
+    setProfile(r.profile, true);
+    if (gAction.key) { preview = null; setPart(car, gAction.key, gAction.value); }
+    else { garage.sel = car.id; scheduleSave(); renderGarage(true); }
+    toastMenu(`Acquistato: −${fmtC(r.price)}`);
+  } else {
+    renderGarage(false);
+    const msg = $("gMsg");
+    msg.textContent = r && r.error === "locked" ? "Auto non ancora sbloccata." : (ERRORS[r && r.error] || "Acquisto non riuscito.");
+    msg.hidden = false;
+  }
+});
+function toastMenu(text) { toast(text, "good"); }
 $("gBack").addEventListener("click", goHome);
 
 // ------------------------------------------------------------------ tracks
@@ -324,12 +377,12 @@ async function finishRun(st) {
   const save = $("oSave");
   if (st.distance < 1 || st.time < 1) { save.textContent = ""; return; }
   save.textContent = "Salvo la partita…";
-  const r = await api.submitRun(token, track.id, car.id, st.distance, Math.round(st.time * 10) / 10, st.cps);
+  const r = await api.submitRun(token, track.id, car.id, st.distance, Math.round(st.time * 10) / 10, st.cps, st.coins);
   if (r && r.profile) {
     const prevBest = (profile.best && profile.best[track.id] && profile.best[track.id].best_m) || 0;
     setProfile(r.profile, true);
     if (st.distance > prevBest) $("oTitle").textContent = "Nuovo record su questa pista!";
-    save.textContent = `Salvata: sei ${r.rank}° su ${track.name}.`;
+    save.textContent = `Salvata: sei ${r.rank}° su ${track.name}. Guadagno: +${fmtC(r.earned)} (${st.coins} monete raccolte).`;
     const box = $("oUnlocks");
     for (const c of CARS) if (!before.cars.includes(c.id) && carUnlocked(c, profile)) { const d = document.createElement("div"); d.textContent = `Nuova auto sbloccata: ${c.name}`; box.appendChild(d); }
     for (const t of TRACKS) if (!before.tracks.includes(t.id) && trackUnlocked(t, profile)) { const d = document.createElement("div"); d.textContent = `Nuova pista sbloccata: ${t.name}`; box.appendChild(d); }
@@ -349,7 +402,7 @@ $("toBox").addEventListener("click", () => { if (!token) { showLogin(ERRORS.no_s
 document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
 
 // ------------------------------------------------------------------ HUD
-const el = { spd: $("spd"), dst: $("dst"), tim: $("tim"), gT: $("gtime"), gS: $("gspd"), cp: $("cpLeft"), turbo: $("cTurbo"), shield: $("cShield"), oil: $("cOil"), off: $("cOff") };
+const el = { coins: $("cCoins"), spd: $("spd"), dst: $("dst"), tim: $("tim"), gT: $("gtime"), gS: $("gspd"), cp: $("cpLeft"), turbo: $("cTurbo"), shield: $("cShield"), oil: $("cOil"), off: $("cOff") };
 let toastTimer = 0;
 function toast(text, kind) {
   const t = $("toast");
@@ -358,6 +411,7 @@ function toast(text, kind) {
 }
 function updateHud() {
   const h = race.hud();
+  el.coins.textContent = fmtC(h.coins);
   el.spd.textContent = h.kmh; el.dst.textContent = h.dist; el.tim.textContent = h.time.toFixed(1); el.cp.textContent = h.toCp;
   el.gT.classList.toggle("low", h.state === "run" && h.time < 5);
   el.gS.classList.toggle("turbo", h.turbo > 0);

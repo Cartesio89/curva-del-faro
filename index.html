@@ -17,12 +17,13 @@
 <div class="app">
   <header>
     <h1>Curva del Faro</h1>
-    <div class="who" id="who" hidden><span id="whoName"></span> · <b id="whoKm">0 km</b></div>
+    <div class="who" id="who" hidden><span id="whoName"></span> · <b id="whoKm">0 km</b> · <b class="coin" id="whoCoins">0 M</b></div>
   </header>
 
   <div class="stage" id="stage">
     <canvas id="view" aria-label="Scena di gioco in 3D"></canvas>
     <div class="loading" id="loading">Carico il motore 3D…</div>
+    <div class="toast" id="toast"></div>
 
     <!-- ===== Race HUD ===== -->
     <div id="raceUi" hidden>
@@ -34,12 +35,12 @@
       <div class="sub">
         <button class="chip chip-btn" id="pauseBtn" aria-label="Pausa">II</button>
         <span class="chip cp">Traguardo tra <b id="cpLeft">0</b> m</span>
+        <span class="chip coins" id="cCoins">0 M</span>
         <span class="chip turbo" id="cTurbo" hidden>Turbo</span>
         <span class="chip shield" id="cShield" hidden>Scudo</span>
         <span class="chip bad" id="cOil" hidden>Olio</span>
         <span class="chip bad" id="cOff" hidden>Fuori strada</span>
       </div>
-      <div class="toast" id="toast"></div>
       <div class="hint" id="hint">Tieni premuto GAS</div>
       <div class="controls">
         <div class="pad">
@@ -100,6 +101,7 @@
       <p class="lock" id="gLock" hidden></p>
       <div class="stats-bars" id="gStats"></div>
       <div id="gParts"></div>
+      <p class="note" id="gMsg" hidden></p>
       <div class="actions">
         <button class="go" id="gUse">Usa questa auto</button>
         <button class="ghost" id="gBack">Box</button>
