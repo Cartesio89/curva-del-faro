@@ -181,3 +181,7 @@ input:focus { outline: none; border-color: var(--amber); }
 .board .nm small { display: block; margin-left: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filters { justify-content: center; }
 .filters .opt { font-size: 14px; padding: 3px 9px; }
+.chip.corner { color: #fff; font-size: 15px; }
+.chip.corner.sev0 { background: #2f9b6a; }
+.chip.corner.sev1 { background: #d98a12; }
+.chip.corner.sev2 { background: #d8352a; }

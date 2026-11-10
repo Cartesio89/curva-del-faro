@@ -262,7 +262,7 @@ export class Race {
     const toCp = Math.max(0, Math.ceil(START_S + CP_FIRST + CP_GAP * this.cpReached - this.s));
     return {
       kmh: Math.round(this.v * 3.6), dist: Math.floor(this.maxS - START_S), time: this.timeLeft, toCp,
-      coins: this.coins, turbo: this.turbo, shield: this.shield > 0, slip: this.slip > 0 && this.state === "run",
+      corner: this.world.nextCorner(this.s), coins: this.coins, turbo: this.turbo, shield: this.shield > 0, slip: this.slip > 0 && this.state === "run",
       off: this.state === "run" && Math.abs(this.x) > ROAD_HALF + 0.6, state: this.state
     };
   }

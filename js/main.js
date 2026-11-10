@@ -554,8 +554,19 @@ function toast(text, kind) {
   t.textContent = text; t.className = "toast"; void t.offsetWidth; t.className = "toast show " + (kind || "");
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.className = "toast"; }, 1200);
 }
+const SEV_LABEL = ["veloce", "media", "stretta"];
+function updateCorner(h) {
+  const chip = $("cornerChip"), c = h.corner;
+  const show = c && c.dist > 0 && c.dist <= 170 && h.state !== "over" && h.state !== "finished";
+  chip.hidden = !show;
+  if (!show) return;
+  const d = c.dist > 125 ? "150 m" : c.dist > 75 ? "100 m" : c.dist > 35 ? "50 m" : "ora";
+  chip.textContent = `${c.dir > 0 ? "→" : "←"} ${c.dir > 0 ? "Destra" : "Sinistra"} ${SEV_LABEL[c.sev]} · ${d}`;
+  chip.className = "chip corner sev" + c.sev;
+}
 function updateHud() {
   const h = race.hud();
+  updateCorner(h);
   if (h.circuit) {
     el.spd.textContent = h.kmh;
     el.dst.textContent = `${h.pos}°`; $("emDist").textContent = `/${h.total}`;

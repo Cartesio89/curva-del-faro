@@ -301,7 +301,7 @@ export class CircuitRace {
   hud() {
     const p = this.player;
     return {
-      circuit: true, kmh: Math.round(p.v * 3.6), pos: this.position(), total: this.cars.length,
+      circuit: true, corner: this.world.nextCorner(p.s), kmh: Math.round(p.v * 3.6), pos: this.position(), total: this.cars.length,
       lap: clamp(p.lap + 1, 1, this.laps), laps: this.laps,
       lapTime: this.state === "countdown" || p.lap < 0 ? 0 : this.t - p.lapStart, best: p.best,
       off: this.state === "run" && Math.abs(p.x) > ROAD_HALF + 0.6, state: this.state

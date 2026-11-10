@@ -178,6 +178,9 @@ function sceneryKit(track) {
   const signMat = (t) => [kit.poleMat, kit.poleMat, kit.poleMat, kit.poleMat, new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 }), kit.poleMat];
   kit.chevMat = { 1: signMat(signTexture("chevron", 1)), "-1": signMat(signTexture("chevron", -1)) };
   kit.warnMat = { 1: signMat(signTexture("warn", 1)), "-1": signMat(signTexture("warn", -1)) };
+  kit.signMat = signMat;
+  kit.boardGeo = new THREE.BoxGeometry(2.4, 1.85, 0.1);
+  kit.boardCache = {};
   kit.pillarGeo = new THREE.BoxGeometry(0.6, 7, 0.6);
   kit.pillarMat = new THREE.MeshStandardMaterial({ color: 0xd9d4c7, roughness: 0.7 });
   kit.bannerGeo = new THREE.BoxGeometry(ROAD_HALF * 2 + 3.4, 1.6, 0.4);
@@ -336,7 +339,6 @@ export class World {
       const k = rnd(kmin, kmin + (kmax - kmin) * (0.45 + 0.55 * d)) * dir;
       const en = segs(rnd(60, 140)), ho = segs(rnd(60, 320)), le = segs(rnd(60, 140));
       const tight = Math.abs(k) > (kmin + kmax) / 2;
-      if (tight && s0 - this.lastWarnS > 300) { this.signs.push({ s: s0 - 120, x: ROAD_HALF + 2.2, kind: "warn", dir }); this.lastWarnS = s0; }
       const lenM = (en + ho + le) * SEG_L;
       this.addRoad(en, ho, le, k, this.randomRise(lenM));
       if (tight) for (let s = s0 + en * SEG_L * 0.5; s < s0 + (en + ho) * SEG_L; s += 30) this.signs.push({ s, x: -dir * (ROAD_HALF + 2.0), kind: "chevron", dir });
@@ -377,7 +379,59 @@ export class World {
 
   ensure(s) {
     while (this.length < s + 2600) this.addPiece();
+    this.scanCorners();
     this.placeItems(0, s + 2400);
+  }
+
+  // Finds corners in the centreline and places 150 / 100 / 50 m approach boards before each one.
+  // sev: 0 fast, 1 medium, 2 tight — by the speed the corner allows
+  scanCorners() {
+    const SL = this.segL || SEG_L;
+    if (!this.corners) { this.corners = []; this.scanI = 0; this.cur = null; }
+    const IN = 1 / 250, OUT = 1 / 320;
+    for (; this.scanI < this.k.length; this.scanI++) {
+      const i = this.scanI, k = this.k[i];
+      const cur = this.cur;
+      if (cur && (Math.abs(k) < OUT || Math.sign(k) !== cur.dir)) {
+        cur.end = i * SL;
+        if (cur.end - cur.s >= 15) this.addCorner(cur);
+        this.cur = null;
+      }
+      if (!this.cur && Math.abs(k) > IN) this.cur = { s: i * SL, dir: Math.sign(k), kmax: 0 };
+      if (this.cur) this.cur.kmax = Math.max(this.cur.kmax, Math.abs(k));
+    }
+  }
+  addCorner(c) {
+    const R = 1 / c.kmax;
+    c.sev = R < 37 ? 2 : R < 103 ? 1 : 0;   // ≈ under 90 km/h, under 150 km/h, faster (average grip)
+    const prev = this.corners[this.corners.length - 1];
+    this.corners.push(c);
+    const put = (d) => {
+      let bs = c.s - d;
+      if (this.loopL) bs = ((bs % this.loopL) + this.loopL) % this.loopL;
+      else if (bs < 20) return;
+      this.signs.push({ s: bs, x: -c.dir * (ROAD_HALF + 2.6), kind: "board", dir: c.dir, num: d, sev: c.sev });
+    };
+    let placed = 0;
+    for (const d of [150, 100, 50]) {
+      if (prev && c.s - d < prev.end + 10) continue;      // would sit inside the previous corner
+      put(d); placed++;
+    }
+    if (!placed && prev) {                                 // corners close together: one board with the real distance
+      const d = Math.floor((c.s - prev.end - 8) / 10) * 10;
+      if (d >= 20) put(d);
+    }
+  }
+  // next corner ahead of s: {dist, dir, sev} or null
+  nextCorner(s) {
+    const cs = this.corners || [];
+    if (!cs.length) return null;
+    let sm = s, off = 0;
+    if (this.loopL) sm = ((s % this.loopL) + this.loopL) % this.loopL;
+    let c = cs.find((x) => x.s > sm);
+    if (!c && this.loopL) { c = cs[0]; off = this.loopL; }
+    if (!c) return null;
+    return { dist: c.s + off - sm, dir: c.dir, sev: c.sev };
   }
 
   // Sample the road at distance s, lateral offset x (positive = right).
@@ -423,6 +477,7 @@ export class World {
     }
     if (this.items.length > 400) this.items = this.items.filter((it) => it.s > s - 60);
     if (this.signs.length > 400) this.signs = this.signs.filter((g) => g.s > s - 300);
+    if (this.corners && this.corners.length > 200) this.corners = this.corners.filter((c) => c.end > s - 300);
   }
   followCamera(cam) {
     this.sky.position.copy(cam.position);
@@ -577,12 +632,14 @@ export class World {
     for (const sg of this.signs) {
       if (sg.s < s0 || sg.s >= s1) continue;
       const p = this.sample(sg.s, sg.x);
-      const mats = sg.kind === "chevron" ? k.chevMat[sg.dir] : k.warnMat[sg.dir];
-      const sign = new THREE.Mesh(k.signGeo, mats);
-      sign.position.set(p.x, p.y + 1.9, p.z);
+      const board = sg.kind === "board";
+      const mats = board ? boardMat(k, sg.num, sg.dir, sg.sev) : sg.kind === "chevron" ? k.chevMat[sg.dir] : k.warnMat[sg.dir];
+      const sign = new THREE.Mesh(board ? k.boardGeo : k.signGeo, mats);
+      sign.position.set(p.x, p.y + (board ? 2.3 : 1.9), p.z);
       sign.rotation.y = p.heading + Math.PI;
       const pole = new THREE.Mesh(k.poleGeo, k.poleMat);
       pole.position.set(p.x, p.y + 0.8, p.z);
+      if (board) { pole.scale.y = 1.4; pole.position.y = p.y + 1.1; }
       grp.add(sign, pole);
     }
     // checkpoints
@@ -660,6 +717,7 @@ export class CircuitWorld extends World {
       const k = this.k[i];
       if (Math.abs(k) > 1 / 70) this.signs.push({ s: i * this.segL, x: -Math.sign(k) * (ROAD_HALF + 2.2), kind: "chevron", dir: Math.sign(k) });
     }
+    this.scanCorners();
     this.centre = P.filter((_, i) => i % 3 === 0);
     // flat ground under everything
     let cx = 0, cz = 0;
@@ -690,4 +748,25 @@ export class CircuitWorld extends World {
     for (let c = 0; c < chunks; c++) this.chunks.set(c, this.buildChunk(c));
     this.built = true;
   }
+}
+
+// approach board: distance, arrow toward the corner, colour = severity (green fast, amber medium, red tight)
+const SEV_COL = ["#2f9b6a", "#f2a01e", "#d8352a"];
+function boardMat(kit, num, dir, sev) {
+  const key = `${num}|${dir}|${sev}`;
+  if (kit.boardCache[key]) return kit.boardCache[key];
+  const c = document.createElement("canvas"); c.width = 192; c.height = 148;
+  const g = c.getContext("2d");
+  g.fillStyle = SEV_COL[sev]; g.fillRect(0, 0, 192, 148);
+  g.fillStyle = "#f7f3ea"; g.fillRect(10, 10, 172, 128);
+  g.fillStyle = "#1d1d1f"; g.font = "bold 64px Arial Black, Impact, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(String(num), 96, 58);
+  g.fillStyle = SEV_COL[sev];
+  const y = 112, x0 = 96;
+  g.beginPath();
+  if (dir > 0) { g.moveTo(x0 - 50, y - 9); g.lineTo(x0 + 22, y - 9); g.lineTo(x0 + 22, y - 20); g.lineTo(x0 + 52, y); g.lineTo(x0 + 22, y + 20); g.lineTo(x0 + 22, y + 9); g.lineTo(x0 - 50, y + 9); }
+  else { g.moveTo(x0 + 50, y - 9); g.lineTo(x0 - 22, y - 9); g.lineTo(x0 - 22, y - 20); g.lineTo(x0 - 52, y); g.lineTo(x0 - 22, y + 20); g.lineTo(x0 - 22, y + 9); g.lineTo(x0 + 50, y + 9); }
+  g.closePath(); g.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return (kit.boardCache[key] = kit.signMat(t));
 }
