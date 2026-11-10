@@ -154,7 +154,10 @@ export function buildCar(car, cfg) {
     for (const x of [-W / 2 + 0.03, W / 2 - 0.03]) body.add(box(0.1, 0.09, wb1 - wb0, cfg.kit === "corsa" ? paint : MAT.trim, x, cc + 0.04, (wb0 + wb1) / 2));
     body.add(box(W * 0.9, 0.035, 0.22, MAT.trim, 0, cc + 0.02, zF - 0.02));
     if (cfg.kit === "corsa") {
-      for (const z of [L / 2 - L * 0.18, -L / 2 + L * 0.17]) for (const x of [-W / 2, W / 2]) body.add(box(0.12, 0.12, r * 2.3, paint, x, r * 1.55, z));
+      for (const z of [L / 2 - L * 0.18, -L / 2 + L * 0.17]) for (const x of [-W / 2, W / 2]) {
+        body.add(box(0.13, 0.28, r * 2.5, paint, x, cc + 0.3, z));                 // flared arch, flush with the body
+        body.add(box(0.14, 0.04, r * 2.5, MAT.trim, x, cc + 0.16, z));             // dark lip under it
+      }
       for (let i = -2; i <= 2; i++) body.add(box(0.02, 0.12, 0.3, MAT.trim, i * W * 0.15, cc + 0.03, zR + 0.12));
     }
   }
@@ -167,6 +170,35 @@ export function buildCar(car, cfg) {
     body.add(box(W * 0.96, 0.04, 0.36, MAT.trim, 0, yW, zR + 0.22));
     for (const x of [-W * 0.46, W * 0.46]) body.add(box(0.03, 0.16, 0.38, MAT.trim, x, yW + 0.02, zR + 0.22));
     for (const x of [-W * 0.3, W * 0.3]) body.add(box(0.05, yW - b, 0.08, MAT.trim, x, (yW + b) / 2, zR + 0.24));
+  }
+
+  // engine
+  const zOf = (u) => u - L / 2;
+  if (cfg.engine === "compressore") {
+    const z = zOf((uWs + L) / 2 + 0.05), y = (nose + b) / 2 + 0.04;
+    body.add(box(0.46, 0.2, 0.55, MAT.trim, 0, y + 0.08, z));
+    body.add(box(0.38, 0.1, 0.45, paint, 0, y + 0.23, z));
+    for (const x of [-0.1, 0.1]) {
+      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.2, 10), MAT.chrome);
+      stack.position.set(x, y + 0.37, z + 0.06); body.add(stack);
+    }
+    const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.05, 12), MAT.chrome);
+    belt.rotation.x = Math.PI / 2; belt.position.set(0, y + 0.1, z + 0.3); body.add(belt);
+  } else if (cfg.engine === "posteriore") {
+    const z0 = zR + 0.18, z1 = zOf(uCe) - 0.08, len = Math.max(0.3, z1 - z0);
+    for (let i = 0; i < 6; i++) body.add(box(W * 0.7, 0.03, 0.05, MAT.trim, 0, b + 0.03, z0 + (len * (i + 0.5)) / 6));
+    for (const x of [-W / 2 - 0.005, W / 2 + 0.005]) body.add(box(0.04, 0.2, 0.55, MAT.trim, x, b - 0.22, zOf(uCe) + 0.35));
+  } else if (cfg.engine === "v8") {
+    const zc = (zR + 0.2 + zOf(uCe)) / 2;
+    body.add(box(W * 0.5, 0.16, 0.6, MAT.trim, 0, b + 0.06, zc));
+    for (let i = 0; i < 4; i++) for (const x of [-0.13, 0.13]) {
+      const st = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.2, 8), MAT.chrome);
+      st.position.set(x, b + 0.24, zc - 0.22 + i * 0.15); body.add(st);
+    }
+    for (const x of [-W * 0.18, W * 0.18]) {
+      const ex = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.25, 10), MAT.chrome);
+      ex.rotation.x = Math.PI / 2; ex.position.set(x, cc + 0.14, zR - 0.08); body.add(ex);
+    }
   }
 
   // wheels
@@ -187,6 +219,7 @@ export function buildCar(car, cfg) {
   group.userData.length = L;
   group.userData.width = W;
   group.userData.tail = MAT.tail;
+  group.userData.color = cfg.color;
   return group;
 }
 

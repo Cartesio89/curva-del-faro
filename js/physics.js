@@ -42,3 +42,41 @@ export function smoothSteer(current, target, dt) {
   const d = target - current;
   return current + clamp(d, -rate * dt, rate * dt);
 }
+
+// Contact between two cars on the same road (s = distance along the road, x = lateral offset).
+// Momentum-conserving impulse with a little bounce, positions separated in proportion to mass.
+// Symmetric: nobody is favoured, only mass and speed matter. Returns the closing speed (m/s).
+export const massKg = (m) => 1100 + (m || 0.5) * 900; // data mass 0..1 → kg
+export function resolveContact(a, b, ds, reachS, reachX) {
+  const ma = massKg(a.mass), mb = massKg(b.mass);
+  const dx = b.x - a.x;
+  const penS = reachS - Math.abs(ds), penX = reachX - Math.abs(dx);
+  if (penS <= 0 || penX <= 0) return 0;
+  const wa = mb / (ma + mb), wb = ma / (ma + mb); // the lighter car moves more
+  if (penS < penX * 1.6) {
+    // nose-to-tail
+    const [r, f, wr, wf, mr, mf] = ds > 0 ? [a, b, wa, wb, ma, mb] : [b, a, wb, wa, mb, ma];
+    const rel = r.v - f.v;
+    if (rel > 0) {
+      const J = (1 + 0.3) * rel / (1 / mr + 1 / mf);
+      r.v = Math.max(0, r.v - J / mr);
+      f.v = f.v + J / mf;
+    }
+    r.s -= penS * wr; f.s += penS * wf;
+    // an off-centre hit turns both cars a little
+    const off = Math.max(-1, Math.min(1, dx / reachX));
+    r.phi = (r.phi || 0) - off * 0.06 * wr; f.phi = (f.phi || 0) + off * 0.06 * wf;
+    return Math.max(0, rel);
+  }
+  // side by side
+  const dir = dx >= 0 ? 1 : -1;
+  a.x -= dir * penX * wa; b.x += dir * penX * wb;
+  const relLat = ((a.latV || 0) - (b.latV || 0)) * dir;
+  if (relLat > 0) {
+    a.phi = (a.phi || 0) - dir * 0.05 * wa * Math.min(1, relLat / 4);
+    b.phi = (b.phi || 0) + dir * 0.05 * wb * Math.min(1, relLat / 4);
+  }
+  // rubbing costs a little speed to both
+  a.v *= 0.995; b.v *= 0.995;
+  return Math.max(0, relLat);
+}

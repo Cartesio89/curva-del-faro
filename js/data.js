@@ -50,6 +50,11 @@ export const carById = (id) => CARS.find((c) => c.id === id) || CARS[0];
 // ---------------------------------------------------------------- parts
 // Each option: label + multipliers on top speed (top), acceleration (acc), grip.
 export const PARTS = {
+  engine: { label: "Motore", options: [
+    { id: "serie", label: "Di serie" },
+    { id: "compressore", label: "Compressore", acc: 1.1, top: 1.03, grip: 0.98 },
+    { id: "posteriore", label: "Posteriore", acc: 1.05, grip: 1.06 },
+    { id: "v8", label: "V8 a vista", acc: 1.12, top: 1.06, grip: 0.99 } ] },
   gears: { label: "Rapporti", options: [
     { id: "corti", label: "Corti", top: 0.92, acc: 1.12 },
     { id: "std", label: "Standard" },
@@ -69,12 +74,12 @@ export const PARTS = {
   rims: { label: "Cerchi", options: [
     { id: "razze", label: "5 razze" }, { id: "multi", label: "Multirazze" }, { id: "pieni", label: "Lenticolari" } ] }
 };
-export const PART_ORDER = ["gears", "tyres", "wing", "kit", "rims"];
+export const PART_ORDER = ["engine", "gears", "tyres", "wing", "kit", "rims"];
 export const COLORS = ["#c8352e", "#3fbfae", "#f2c14e", "#2b4fa3", "#f4f1e8", "#24212c", "#ff7a1a", "#2f9b6a", "#8e4fc2", "#9aa3ad"];
 
 export function defaultConfig(car) {
   const i = CARS.indexOf(car);
-  return { color: COLORS[i % COLORS.length], gears: "std", tyres: "medie", wing: car.shape.type === "wedge" || car.shape.type === "proto" ? "basso" : "nessuno", kit: "stradale", rims: "razze" };
+  return { color: COLORS[i % COLORS.length], engine: "serie", gears: "std", tyres: "medie", wing: car.shape.type === "wedge" || car.shape.type === "proto" ? "basso" : "nessuno", kit: "stradale", rims: "razze" };
 }
 
 export function cleanConfig(car, cfg) {
@@ -159,8 +164,8 @@ export function unlockText(item) {
 
 // ---------------------------------------------------------------- coins (mirror of faro__catalog / faro__price on the server)
 export const CAR_PRICE = { lucciola: 0, gabbiano: 1500, delfino: 3000, medusa: 5000, cormorano: 7500, squalo: 10000, falco: 14000, orca: 19000, fulmine: 25000, faro: 33000 };
-const PART_BASE = { "gears:corti": 400, "gears:lunghi": 400, "tyres:dure": 300, "tyres:morbide": 500, "wing:basso": 300, "wing:alto": 600, "kit:sport": 600, "kit:corsa": 1200, "rims:multi": 200, "rims:pieni": 200 };
-const FREE = ["gears:std", "tyres:medie", "wing:nessuno", "kit:stradale", "rims:razze"];
+const PART_BASE = { "engine:compressore": 900, "engine:posteriore": 1100, "engine:v8": 1800, "gears:corti": 400, "gears:lunghi": 400, "tyres:dure": 300, "tyres:morbide": 500, "wing:basso": 300, "wing:alto": 600, "kit:sport": 600, "kit:corsa": 1200, "rims:multi": 200, "rims:pieni": 200 };
+const FREE = ["engine:serie", "gears:std", "tyres:medie", "wing:nessuno", "kit:stradale", "rims:razze"];
 const WING_DEFAULT = ["orca", "fulmine", "faro"];
 const tierPrice = (base, idx) => Math.round((base * (1 + idx * 0.3)) / 10) * 10;
 

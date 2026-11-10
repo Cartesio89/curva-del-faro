@@ -458,7 +458,16 @@ async function finishCircuit(st) {
   $("oL3").textContent = "Contatti"; $("oNear").textContent = st.contacts;
   $("oL4").textContent = "Premio"; $("oHit").textContent = fmtC(prizeFor(circuit, st.position));
   const ord = $("oOrder"); ord.textContent = ""; ord.hidden = false;
-  st.order.forEach((o, i) => { const li = document.createElement("li"); if (o.isPlayer) li.className = "me"; const b = document.createElement("b"); b.textContent = `${i + 1}.`; li.append(b, document.createTextNode(o.name)); ord.appendChild(li); });
+  const winner = st.order[0].time;
+  st.order.forEach((o, i) => {
+    const li = document.createElement("li"); if (o.isPlayer) li.className = "me";
+    const pos = document.createElement("b"); pos.textContent = `${i + 1}.`;
+    const nm = document.createElement("span"); nm.className = "on"; nm.textContent = o.name;
+    const car = document.createElement("small"); car.textContent = carById(o.carId).name + (o.setup ? setupText(o.setup) : ""); nm.appendChild(car);
+    const tm = document.createElement("span"); tm.className = "ot";
+    tm.textContent = i === 0 ? fmtLap(o.time) : `+${(o.time - winner).toFixed(1).replace(".", ",")} s`;
+    li.append(pos, nm, tm); ord.appendChild(li);
+  });
   $("oUnlocks").textContent = "";
   $("oBoardTitle").textContent = "Top 10 · Gare";
   $("oBoard").innerHTML = "";
@@ -476,6 +485,16 @@ async function finishCircuit(st) {
     if (r && r.error === "no_session") { token = null; store.del("faro-token"); }
   }
   renderBoard($("oBoard"), await api.topRaces(), profile && profile.name, "races");
+}
+
+// short description of an AI setup: only the non-stock parts
+function setupText(cfg) {
+  const bits = [];
+  for (const k of PART_ORDER) {
+    const o = PARTS[k].options;
+    if (cfg[k] && cfg[k] !== o[k === "tyres" ? 1 : k === "gears" ? 1 : 0].id && k !== "rims") bits.push(o.find((x) => x.id === cfg[k]).label.toLowerCase());
+  }
+  return bits.length ? " · " + bits.join(", ") : "";
 }
 
 // ------------------------------------------------------------------ race
@@ -564,9 +583,39 @@ function updateCorner(h) {
   chip.textContent = `${c.dir > 0 ? "→" : "←"} ${c.dir > 0 ? "Destra" : "Sinistra"} ${SEV_LABEL[c.sev]} · ${d}`;
   chip.className = "chip corner sev" + c.sev;
 }
+function drawMinimap() {
+  const cv = $("minimap");
+  if (!race || !race.minimap) { cv.hidden = true; return; }
+  cv.hidden = false;
+  const m = race.minimap(), g = cv.getContext("2d"), S = cv.width;
+  if (!race.mapBox) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [x, z] of m.path) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const span = Math.max(x1 - x0, z1 - z0) || 1;
+    race.mapBox = { x0, z0, k: (S - 28) / span, ox: (S - (x1 - x0) * ((S - 28) / span)) / 2, oz: (S - (z1 - z0) * ((S - 28) / span)) / 2 };
+  }
+  const b = race.mapBox;
+  const P = (x, z) => [b.ox + (x - b.x0) * b.k, b.oz + (z - b.z0) * b.k];
+  g.clearRect(0, 0, S, S);
+  g.fillStyle = "rgba(22,20,28,0.72)"; g.beginPath(); g.roundRect(0, 0, S, S, 18); g.fill();
+  g.lineJoin = "round"; g.lineCap = "round";
+  g.beginPath(); m.path.forEach(([x, z], i) => { const [px, pz] = P(x, z); i ? g.lineTo(px, pz) : g.moveTo(px, pz); }); g.closePath();
+  g.strokeStyle = "rgba(255,244,226,0.25)"; g.lineWidth = 12; g.stroke();
+  g.strokeStyle = "#fff4e2"; g.lineWidth = 4; g.stroke();
+  const [sx, sz] = P(m.path[0][0], m.path[0][1]);
+  g.fillStyle = "#1d1d1f"; g.fillRect(sx - 6, sz - 2, 12, 4);
+  for (const c of m.cars.filter((c) => !c.isPlayer)) {
+    const [x, z] = P(c.x, c.z);
+    g.fillStyle = c.color; g.strokeStyle = "#1d1d1f"; g.lineWidth = 2.5;
+    g.beginPath(); g.arc(x, z, 7, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
+  const me = m.cars.find((c) => c.isPlayer);
+  if (me) { const [x, z] = P(me.x, me.z); g.fillStyle = "#ffb23e"; g.strokeStyle = "#fff"; g.lineWidth = 3; g.beginPath(); g.arc(x, z, 10, 0, Math.PI * 2); g.fill(); g.stroke(); }
+}
 function updateHud() {
   const h = race.hud();
   updateCorner(h);
+  drawMinimap();
   if (h.circuit) {
     el.spd.textContent = h.kmh;
     el.dst.textContent = `${h.pos}°`; $("emDist").textContent = `/${h.total}`;
@@ -602,6 +651,15 @@ function bindPad(btn, key) {
   btn.addEventListener("pointerdown", down); btn.addEventListener("pointerup", up);
   btn.addEventListener("pointercancel", up); btn.addEventListener("lostpointercapture", up);
   btn.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+{
+  const rb = $("rearBtn");
+  const on = (e) => { e.preventDefault(); if (race) race.rearView = true; rb.classList.add("on"); try { rb.setPointerCapture(e.pointerId); } catch (_) {} };
+  const off = () => { if (race) race.rearView = false; rb.classList.remove("on"); };
+  rb.addEventListener("pointerdown", on); rb.addEventListener("pointerup", off); rb.addEventListener("pointercancel", off); rb.addEventListener("lostpointercapture", off);
+  rb.addEventListener("contextmenu", (e) => e.preventDefault());
+  addEventListener("keydown", (e) => { if (e.code === "KeyC" && race && !(e.target && e.target.tagName === "INPUT")) race.rearView = true; });
+  addEventListener("keyup", (e) => { if (e.code === "KeyC" && race) race.rearView = false; });
 }
 bindPad($("bG"), "gas"); bindPad($("bB"), "brake"); bindPad($("bL"), "left"); bindPad($("bR"), "right");
 stage.addEventListener("contextmenu", (e) => e.preventDefault());

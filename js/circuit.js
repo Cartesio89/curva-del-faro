@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { CircuitWorld } from "./world.js";
 import { buildCar, disposeCar } from "./carmodel.js";
-import { stepCar, smoothSteer, maxYaw, GRIP_ARCADE } from "./physics.js";
-import { CARS, COLORS, CIRCUITS, AI_NAMES, defaultConfig, performance, ROAD_HALF } from "./data.js";
+import { stepCar, smoothSteer, maxYaw, resolveContact, GRIP_ARCADE } from "./physics.js";
+import { CARS, COLORS, CIRCUITS, AI_NAMES, PARTS, PART_ORDER, defaultConfig, performance, ROAD_HALF } from "./data.js";
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -37,20 +37,26 @@ export class CircuitRace {
     this.laps = circuit.laps;
 
     // cars: 5 AI on the first slots, the player starts last
-    const pPerf = performance(car, cfg);
+    // AI cars start from the player's car *as it leaves the factory* (so the player's own parts are a real edge),
+    // then get a random setup whose effects are visible both on the car and on the stopwatch.
+    const pStock = performance(car, defaultConfig(car));
     const level = [0.97, 0.99, 1.01, 1.03, 1.05][Math.max(0, CIRCUITS.indexOf(circuit))];
     const names = AI_NAMES.slice().sort(() => Math.random() - 0.5);
     this.cars = [];
     for (let j = 0; j < 5; j++) {
       const rel = level * rnd(0.98, 1.04) * (j === 0 ? 1.03 : 1); // slot 0 is the pace-setter
-      const want = pPerf.topKmh * rel;
+      const want = pStock.topKmh * rel;
       const model = CARS.slice().sort((a, b) => Math.abs(a.top - want) - Math.abs(b.top - want))[0];
-      const mcfg = { ...defaultConfig(model), color: COLORS[(j * 3 + 1) % COLORS.length], rims: ["razze", "multi", "pieni"][j % 3] };
+      const mcfg = { ...defaultConfig(model), color: COLORS[(j * 3 + 1) % COLORS.length] };
+      for (const key of PART_ORDER) { const o = PARTS[key].options; mcfg[key] = o[Math.floor(Math.random() * o.length)].id; }
+      const mStock = performance(model, defaultConfig(model)), mSet = performance(model, mcfg);
       const obj = buildCar(model, mcfg);
       scene.add(obj);
       this.cars.push(this.makeCar({
         name: names[j], isPlayer: false, obj, len: model.shape.L, wid: model.shape.W,
-        perf: { topMs: pPerf.topMs * rel, a0: pPerf.a0 * rel, grip: pPerf.grip * rnd(0.96, 1.04) },
+        perf: { topMs: pStock.topMs * rel * (mSet.topMs / mStock.topMs), a0: pStock.a0 * rel * (mSet.a0 / mStock.a0),
+                grip: pStock.grip * rnd(0.98, 1.02) * (mSet.grip / mStock.grip) },
+        mass: model.mass, setup: mcfg,
         skill: clamp(rnd(0.93, 0.99) + (j === 0 ? 0.03 : 0), 0.9, 1.02), aggr: rnd(0.3, 0.9), carId: model.id
       }, j));
     }
@@ -62,7 +68,7 @@ export class CircuitRace {
       const tgt = new THREE.Object3D(); tgt.position.set(0, 0, 30);
       pObj.add(head, tgt); head.target = tgt;
     }
-    this.player = this.makeCar({ name: opts.playerName || "Tu", isPlayer: true, obj: pObj, len: car.shape.L, wid: car.shape.W, perf: pPerf, skill: 0.95, carId: car.id }, 5);
+    this.player = this.makeCar({ name: opts.playerName || "Tu", isPlayer: true, obj: pObj, len: car.shape.L, wid: car.shape.W, perf: performance(car, cfg), mass: car.mass, setup: cfg, skill: 0.95, carId: car.id }, 5);
     this.cars.push(this.player);
 
     this.t = 0;
@@ -135,6 +141,12 @@ export class CircuitRace {
       if (k > 1e-4) vt = Math.min(vt, Math.sqrt(Math.max(0, (Gplan / k) + 2 * brakeA * Math.max(0, d - 6))));
     }
     if (mist === "early") vt *= 0.92;
+    // never drive into the back of the car ahead
+    for (const o of this.cars) {
+      if (o === c) continue;
+      const ds = this.wrapDs(o.s - c.s);
+      if (ds > 0 && ds < 14 && Math.abs(o.x - c.x) < 2.1) vt = Math.min(vt, o.v + Math.max(0, ds - 6) * 0.8);
+    }
     const gas = c.v < vt - 0.3;
     const brake = c.v > vt + 1.2;
 
@@ -229,12 +241,9 @@ export class CircuitRace {
       const ds = this.wrapDs(b.s - a.s);
       const reachS = (a.len + b.len) / 2 - 0.2, reachX = (a.wid + b.wid) / 2 - 0.1;
       if (Math.abs(ds) < reachS && Math.abs(b.x - a.x) < reachX) {
-        const [rear, front] = ds > 0 ? [a, b] : [b, a];
-        if (rear.v > front.v) { rear.v = front.v * 0.9; rear.s -= reachS - Math.abs(ds); }
-        const push = (reachX - Math.abs(b.x - a.x)) / 2 + 0.05;
-        const dir = b.x >= a.x ? 1 : -1;
-        a.x -= dir * push; b.x += dir * push;
-        if ((a.isPlayer || b.isPlayer) && this.state === "run" && !this.contactCool) {
+        // same momentum-based solver for everyone (s is unwrapped progress, so use the wrapped gap)
+        const rel = resolveContact(a, b, ds, reachS, reachX);
+        if ((a.isPlayer || b.isPlayer) && this.state === "run" && !this.contactCool && rel > 1) {
           this.contacts++; this.shake = 0.35; this.contactCool = 0.8;
           this.hooks.onToast("Contatto!", "bad");
         }
@@ -259,8 +268,29 @@ export class CircuitRace {
     this.state = "finished";
     const pos = this.finishedOrder.indexOf(this.player) + 1;
     const p = this.player;
-    this.hooks.onFinish({ position: pos, total: this.cars.length, time: p.finishTime, best: p.best, contacts: this.contacts,
-      order: this.cars.slice().sort((a, b) => (a.finished && b.finished ? a.finishTime - b.finishTime : a.finished ? -1 : b.finished ? 1 : b.s - a.s)).map((c) => ({ name: c.name, isPlayer: c.isPlayer, carId: c.carId })) });
+    const times = this.projectFinishTimes();
+    const order = this.cars.map((c) => ({ name: c.name, isPlayer: c.isPlayer, carId: c.carId, time: times.get(c), best: c.isPlayer ? p.best : null, setup: c.setup }))
+      .sort((a, b) => a.time - b.time);
+    this.hooks.onFinish({ position: pos, total: this.cars.length, time: p.finishTime, best: p.best, contacts: this.contacts, order });
+  }
+
+  // Runs the rest of the race off-screen on a copy of the state to get everybody's finishing time,
+  // then puts every car back where it was.
+  projectFinishTimes() {
+    const keys = ["s", "x", "v", "phi", "latV", "yaw", "lap", "lapStart", "lastLap", "best", "finished", "finishTime", "steerSm", "mistakeT", "mistakeKind", "passSide", "passT", "blockX", "blockT", "mode"];
+    const snap = this.cars.map((c) => Object.fromEntries(keys.map((k) => [k, c[k]])));
+    const saved = { t: this.t, order: this.finishedOrder.slice(), hooks: this.hooks, contacts: this.contacts, shake: this.shake };
+    this.hooks = { onToast() {}, onFinish() {}, onCountdown() {}, onStart() {} };
+    const times = new Map();
+    let guard = 0;
+    while (this.cars.some((c) => !c.finished) && guard++ < 60 * 900) this.update(1 / 60, {});
+    for (const c of this.cars) {
+      if (c.finished) times.set(c, c.finishTime);
+      else { const left = this.laps * this.L - c.s; times.set(c, this.t + left / Math.max(10, c.v)); }
+    }
+    this.cars.forEach((c, i) => Object.assign(c, snap[i]));
+    Object.assign(this, { t: saved.t, finishedOrder: saved.order, hooks: saved.hooks, contacts: saved.contacts, shake: saved.shake });
+    return times;
   }
 
   // ------------------------------------------------------------------ render
@@ -290,12 +320,30 @@ export class CircuitRace {
     if (this.shake > 0) this.camera.position.add(new THREE.Vector3(rnd(-0.1, 0.1), rnd(-0.08, 0.08), 0));
     const look = new THREE.Vector3().copy(P.position).addScaledVector(dir, 5); look.y += 1.1;
     this.camera.lookAt(look);
+    if (this.rearView) {
+      // look back from the roof
+      const eye = new THREE.Vector3().copy(P.position).addScaledVector(dir, 0.3); eye.y += 1.75;
+      const tgt = new THREE.Vector3().copy(P.position).addScaledVector(dir, -30); tgt.y += 0.9;
+      this.camera.position.copy(eye); this.camera.lookAt(tgt);
+    }
     const fov = (this.portrait ? 74 : 62) + Math.min(1, this.player.v / 70) * 10;
     if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov += (fov - this.camera.fov) * Math.min(1, dtReal * 3); this.camera.updateProjectionMatrix(); }
     this.sun.position.copy(P.position).addScaledVector(this.sunDir, 70);
     this.sun.target.position.copy(P.position);
     w.followCamera(this.camera);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  // data for the overlay map: track outline (once) and every car
+  minimap() {
+    const w = this.world;
+    if (!this.mapPath) {
+      this.mapPath = [];
+      for (let i = 0; i < w.px.length; i += 4) this.mapPath.push([w.px[i], w.pz[i]]);
+    }
+    const tmp = {};
+    const cars = this.cars.map((c) => { w.sample(c.s, c.x, tmp); return { x: tmp.x, z: tmp.z, isPlayer: c.isPlayer, color: c.obj.userData.color || "#ffffff" }; });
+    return { path: this.mapPath, cars };
   }
 
   hud() {

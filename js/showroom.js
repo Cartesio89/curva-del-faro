@@ -56,7 +56,7 @@ export class Showroom {
     this.portrait = h > w || w < 760;
     this.camera.fov = this.portrait ? 46 : 32;
     // keep the car clear of the menu panel: right-hand panel on wide screens, bottom sheet on phones
-    if (this.portrait) this.camera.setViewOffset(w, h, 0, h * 0.24, w, h);
+    if (this.portrait) this.camera.setViewOffset(w, h, 0, h * 0.3, w, h);
     else this.camera.setViewOffset(w, h, Math.min(w * 0.2, 220), 0, w, h);
     this.camera.updateProjectionMatrix();
   }
