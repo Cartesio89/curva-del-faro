@@ -162,7 +162,7 @@ $("goRace").addEventListener("click", () => startRace());
 $("goGarage").addEventListener("click", () => openGarage());
 $("goTracks").addEventListener("click", () => openTracks());
 $("goCircuits").addEventListener("click", () => openCircuits());
-$("goBoard").addEventListener("click", () => openBoard(selTrack().id));
+$("goBoard").addEventListener("click", () => openBoard("endless"));
 $("goLogout").addEventListener("click", async () => {
   if (token) api.logout(token);
   token = null; store.del("faro-token"); profile = null;
@@ -334,38 +334,49 @@ function openTracks() {
 $("tBack").addEventListener("click", goHome);
 
 // ------------------------------------------------------------------ leaderboard
-function renderBoard(ol, rows, highlightName, laps) {
+// kind: "endless" (best distance on any track) or "races" (championship points)
+function renderBoard(ol, rows, highlightName, kind) {
   ol.textContent = "";
   const li0 = (text) => { const li = document.createElement("li"); li.className = "empty"; li.textContent = text; ol.appendChild(li); };
   if (!Array.isArray(rows)) return li0("Classifica non raggiungibile in questo momento.");
-  if (!rows.length) return li0(laps ? "Ancora nessun giro registrato. Il primo posto è libero." : "Ancora nessun tempo su questa pista. Il primo posto è libero.");
+  if (!rows.length) return li0(kind === "races" ? "Ancora nessuna gara conclusa. Il primo posto è libero." : "Ancora nessun risultato. Il primo posto è libero.");
   rows.forEach((r, i) => {
     const li = document.createElement("li");
     if (highlightName && r.name.toLowerCase() === highlightName.toLowerCase()) li.className = "me";
     const pos = document.createElement("span"); pos.className = "pos"; pos.textContent = i + 1;
     const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = r.name;
-    const car = document.createElement("small"); car.textContent = carById(r.car).name; nm.appendChild(car);
+    const sub = document.createElement("small");
     const m = document.createElement("span"); m.className = "m";
     const t = document.createElement("span"); t.className = "t";
-    if (laps) { m.textContent = fmtLap(Number(r.best_lap)); t.textContent = `${r.position}° pos.`; }
-    else { m.textContent = fmtM(r.distance_m); t.textContent = Math.round(r.time_s) + " s"; }
+    if (kind === "races") {
+      sub.textContent = `${r.circuits}/5 circuiti`;
+      m.textContent = `${r.points} pt`;
+      t.textContent = r.wins === 1 ? "1 vittoria" : `${r.wins} vittorie`;
+    } else {
+      sub.textContent = `${trackById(r.track).name} · ${carById(r.car).name}`;
+      m.textContent = fmtM(r.distance_m);
+      t.textContent = Math.round(r.time_s) + " s";
+    }
+    nm.appendChild(sub);
     li.append(pos, nm, m, t); ol.appendChild(li);
   });
 }
-async function openBoard(id) {
+async function openBoard(kind) {
+  kind = kind === "races" ? "races" : "endless";
   const tabs = $("boardTabs"); tabs.textContent = "";
-  const all = [...TRACKS.map((t) => ({ id: t.id, name: t.name, laps: false })), ...CIRCUITS.map((c) => ({ id: c.id, name: "Gara: " + c.name, laps: true }))];
-  const cur = all.find((x) => x.id === id) || all[0];
-  for (const t of all) {
+  for (const [k, label] of [["endless", "Pista infinita"], ["races", "Gare"]]) {
     const b = document.createElement("button");
-    b.className = "tab" + (t.id === cur.id ? " on" : ""); b.textContent = t.name; b.setAttribute("role", "tab");
-    b.addEventListener("click", () => openBoard(t.id));
+    b.className = "tab" + (k === kind ? " on" : ""); b.textContent = label; b.setAttribute("role", "tab");
+    b.addEventListener("click", () => openBoard(k));
     tabs.appendChild(b);
   }
+  $("boardNote").textContent = kind === "races"
+    ? "Campionato: per ogni circuito conta il tuo miglior arrivo (25, 18, 15, 12, 10, 8 punti dal 1° al 6°)."
+    : "Il miglior risultato di ogni pilota, su qualsiasi pista.";
   show("scrBoard");
   const ol = $("boardList");
   ol.innerHTML = '<li class="empty">Carico…</li>';
-  renderBoard(ol, cur.laps ? await api.topLaps(cur.id) : await api.top(cur.id), profile && profile.name, cur.laps);
+  renderBoard(ol, kind === "races" ? await api.topRaces() : await api.topEndless(), profile && profile.name, kind);
 }
 $("bBack").addEventListener("click", goHome);
 
@@ -430,7 +441,7 @@ async function finishCircuit(st) {
   const ord = $("oOrder"); ord.textContent = ""; ord.hidden = false;
   st.order.forEach((o, i) => { const li = document.createElement("li"); if (o.isPlayer) li.className = "me"; const b = document.createElement("b"); b.textContent = `${i + 1}.`; li.append(b, document.createTextNode(o.name)); ord.appendChild(li); });
   $("oUnlocks").textContent = "";
-  $("oBoardTitle").textContent = `Giri più veloci · ${circuit.name}`;
+  $("oBoardTitle").textContent = "Top 10 · Gare";
   $("oBoard").innerHTML = "";
   show("scrOver");
   $("again").focus({ preventScroll: true });
@@ -439,13 +450,13 @@ async function finishCircuit(st) {
   const r = await api.submitCircuit(token, circuit.id, car.id, st.position, Math.round(st.time * 10) / 10, Math.round(st.best * 10) / 10);
   if (r && r.profile) {
     setProfile(r.profile, true);
-    save.textContent = `Salvata: +${fmtC(r.earned)}. Il tuo giro migliore è ${r.lap_rank}° in classifica.`;
+    save.textContent = `Salvata: +${fmtC(r.earned)}.`;
     for (const c of CIRCUITS) if (!beforeNext.includes(c.id) && circuitUnlocked(c, profile)) { const d = document.createElement("div"); d.textContent = `Nuovo circuito sbloccato: ${c.name}`; $("oUnlocks").appendChild(d); }
   } else {
     save.textContent = ERRORS[r && r.error] || "Gara non salvata.";
     if (r && r.error === "no_session") { token = null; store.del("faro-token"); }
   }
-  renderBoard($("oBoard"), await api.topLaps(circuit.id), profile && profile.name, true);
+  renderBoard($("oBoard"), await api.topRaces(), profile && profile.name, "races");
 }
 
 // ------------------------------------------------------------------ race
@@ -482,7 +493,7 @@ async function finishRun(st) {
   $("oTime").textContent = Math.round(st.time) + " s";
   $("oCp").textContent = st.cps; $("oNear").textContent = st.near; $("oHit").textContent = st.crashes;
   $("oUnlocks").textContent = "";
-  $("oBoardTitle").textContent = `Top 10 · ${track.name}`;
+  $("oBoardTitle").textContent = "Top 10 · Pista infinita";
   $("oBoard").innerHTML = "";
   show("scrOver");
   $("again").focus({ preventScroll: true });
@@ -502,7 +513,7 @@ async function finishRun(st) {
     save.textContent = ERRORS[r && r.error] || "Partita non salvata.";
     if (r && r.error === "no_session") { token = null; store.del("faro-token"); }
   }
-  renderBoard($("oBoard"), await api.top(track.id), profile && profile.name);
+  renderBoard($("oBoard"), await api.topEndless(), profile && profile.name, "endless");
 }
 function pause() { if (mode !== "race") return; mode = "paused"; clearInput(); show("scrPause"); $("resume").focus({ preventScroll: true }); }
 function resume() { if (mode !== "paused") return; show(null); mode = "race"; }
