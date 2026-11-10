@@ -35,7 +35,8 @@ export const api = {
   submitCircuit: (token, circuit, car, position, time, bestLap) =>
     rpc("faro_submit_circuit", { p_token: token, p_circuit: circuit, p_car: car, p_position: position, p_time: time, p_best_lap: bestLap }),
   topLaps: (circuit) => rpc("faro_top_laps", { p_circuit: circuit }),
-  topEndless: () => rpc("faro_top_endless", {}),
+  topEndless: (track) => rpc("faro_top_endless", track ? { p_track: track } : {}),
+  topCircuit: (circuit) => rpc("faro_top_circuit", { p_circuit: circuit }),
   topRaces: () => rpc("faro_top_races", {})
 };
 

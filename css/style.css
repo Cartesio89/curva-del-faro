@@ -179,3 +179,5 @@ input:focus { outline: none; border-color: var(--amber); }
 .hint.count { font-family: var(--f-display); font-size: 64px; background: transparent; text-shadow: 0 4px 0 rgba(0,0,0,0.45); padding: 0; }
 .board li { align-items: center; }
 .board .nm small { display: block; margin-left: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filters { justify-content: center; }
+.filters .opt { font-size: 14px; padding: 3px 9px; }

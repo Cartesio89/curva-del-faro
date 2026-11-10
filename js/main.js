@@ -334,12 +334,12 @@ function openTracks() {
 $("tBack").addEventListener("click", goHome);
 
 // ------------------------------------------------------------------ leaderboard
-// kind: "endless" (best distance on any track) or "races" (championship points)
+// kind: "endless" (top 10 runs), "races" (championship points) or "circuit" (top 10 races on one circuit)
 function renderBoard(ol, rows, highlightName, kind) {
   ol.textContent = "";
   const li0 = (text) => { const li = document.createElement("li"); li.className = "empty"; li.textContent = text; ol.appendChild(li); };
   if (!Array.isArray(rows)) return li0("Classifica non raggiungibile in questo momento.");
-  if (!rows.length) return li0(kind === "races" ? "Ancora nessuna gara conclusa. Il primo posto è libero." : "Ancora nessun risultato. Il primo posto è libero.");
+  if (!rows.length) return li0(kind === "endless" ? "Ancora nessun risultato qui. Il primo posto è libero." : "Ancora nessuna gara conclusa qui. Il primo posto è libero.");
   rows.forEach((r, i) => {
     const li = document.createElement("li");
     if (highlightName && r.name.toLowerCase() === highlightName.toLowerCase()) li.className = "me";
@@ -349,9 +349,13 @@ function renderBoard(ol, rows, highlightName, kind) {
     const m = document.createElement("span"); m.className = "m";
     const t = document.createElement("span"); t.className = "t";
     if (kind === "races") {
-      sub.textContent = `${r.circuits}/5 circuiti`;
+      sub.textContent = `${r.circuits}/5 circuiti · ${r.races} gare`;
       m.textContent = `${r.points} pt`;
       t.textContent = r.wins === 1 ? "1 vittoria" : `${r.wins} vittorie`;
+    } else if (kind === "circuit") {
+      sub.textContent = `${carById(r.car).name} · giro ${fmtLap(Number(r.best_lap))}`;
+      m.textContent = `${r.position}° pos.`;
+      t.textContent = fmtLap(Number(r.total_time));
     } else {
       sub.textContent = `${trackById(r.track).name} · ${carById(r.car).name}`;
       m.textContent = fmtM(r.distance_m);
@@ -361,7 +365,8 @@ function renderBoard(ol, rows, highlightName, kind) {
     li.append(pos, nm, m, t); ol.appendChild(li);
   });
 }
-async function openBoard(kind) {
+// kind: "endless" | "races"; filter: track id / circuit id, or "" for the overall board
+async function openBoard(kind, filter = "") {
   kind = kind === "races" ? "races" : "endless";
   const tabs = $("boardTabs"); tabs.textContent = "";
   for (const [k, label] of [["endless", "Pista infinita"], ["races", "Gare"]]) {
@@ -370,13 +375,27 @@ async function openBoard(kind) {
     b.addEventListener("click", () => openBoard(k));
     tabs.appendChild(b);
   }
+  const fl = $("boardFilters"); fl.textContent = "";
+  const opts = kind === "races"
+    ? [["", "Campionato"], ...CIRCUITS.map((c) => [c.id, c.name])]
+    : [["", "Tutte le piste"], ...TRACKS.map((t) => [t.id, t.name])];
+  for (const [id, label] of opts) {
+    const b = document.createElement("button");
+    b.className = "opt" + (id === filter ? " on" : ""); b.textContent = label;
+    b.addEventListener("click", () => openBoard(kind, id));
+    fl.appendChild(b);
+  }
   $("boardNote").textContent = kind === "races"
-    ? "Campionato: per ogni circuito conta il tuo miglior arrivo (25, 18, 15, 12, 10, 8 punti dal 1° al 6°)."
-    : "Il miglior risultato di ogni pilota, su qualsiasi pista.";
+    ? (filter ? "Le 10 migliori gare su questo circuito: prima il piazzamento, poi il tempo totale."
+              : "Campionato: per ogni circuito conta il miglior arrivo di ciascun pilota (25, 18, 15, 12, 10, 8 punti dal 1° al 6°).")
+    : (filter ? "I 10 migliori risultati su questa pista." : "I 10 migliori risultati su tutte le piste.");
   show("scrBoard");
   const ol = $("boardList");
   ol.innerHTML = '<li class="empty">Carico…</li>';
-  renderBoard(ol, kind === "races" ? await api.topRaces() : await api.topEndless(), profile && profile.name, kind);
+  let rows, k;
+  if (kind === "races") { rows = filter ? await api.topCircuit(filter) : await api.topRaces(); k = filter ? "circuit" : "races"; }
+  else { rows = await api.topEndless(filter || null); k = "endless"; }
+  renderBoard(ol, rows, profile && profile.name, k);
 }
 $("bBack").addEventListener("click", goHome);
 
