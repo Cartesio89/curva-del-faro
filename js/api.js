@@ -37,7 +37,12 @@ export const api = {
   topLaps: (circuit) => rpc("faro_top_laps", { p_circuit: circuit }),
   topEndless: (track) => rpc("faro_top_endless", track ? { p_track: track } : {}),
   topCircuit: (circuit) => rpc("faro_top_circuit", { p_circuit: circuit }),
-  topRaces: () => rpc("faro_top_races", {})
+  topRaces: () => rpc("faro_top_races", {}),
+  champCurrent: (token) => rpc("faro_champ_current", { p_token: token }),
+  champStart: (token, car, field) => rpc("faro_champ_start", { p_token: token, p_car: car, p_field: field }),
+  champStage: (token, champ, position, time, bestLap, order, retire) =>
+    rpc("faro_champ_stage", { p_token: token, p_champ: champ, p_position: position, p_time: time, p_best_lap: bestLap, p_order: order, p_retire: !!retire }),
+  topChamp: () => rpc("faro_top_champ", {})
 };
 
 export const ERRORS = {
@@ -54,5 +59,6 @@ export const ERRORS = {
   already_owned: "Ce l'hai già.",
   car_not_owned: "Prima devi comprare l'auto.",
   bad_item: "Oggetto non in vendita.",
-  locked_circuit: "Circuito non ancora sbloccato."
+  locked_circuit: "Circuito non ancora sbloccato.",
+  no_champ: "Campionato non trovato o già concluso."
 };

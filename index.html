@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#191a22">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Curva del Faro</title>
 <meta name="description" content="Gioco di guida 3D infinito: sblocca 10 auto e 5 piste, personalizza i pezzi, scala la top 10 di ogni pista.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -34,6 +39,7 @@
       </div>
       <div class="sub">
         <button class="chip chip-btn" id="pauseBtn" aria-label="Pausa">II</button>
+        <button class="chip chip-btn" id="fsChip" aria-label="Schermo intero" hidden>⛶</button>
         <span class="chip cp" id="cpChip">Traguardo tra <b id="cpLeft">0</b> m</span>
         <span class="chip cp" id="lapChip" hidden></span>
         <span class="chip coins" id="cCoins">0 M</span>
@@ -82,17 +88,26 @@
       <h2 id="homeTitle">Box</h2>
       <div class="pick">
         <div><small>Auto</small><b id="homeCar">—</b></div>
-        <div><small>Pista</small><b id="homeTrack">—</b></div>
+        <button class="pick-btn" id="homeTrackBtn" aria-label="Cambia pista infinita"><small>Pista ✎</small><b id="homeTrack">—</b></button>
         <div><small>Record qui</small><b id="homeBest">—</b></div>
       </div>
-      <button class="go big-go" id="goRace">Corri</button>
+      <button class="go big-go" id="goRace">Corri · pista infinita</button>
       <button class="ghost wide" id="goCircuits">Gare in pista</button>
       <div class="menu-grid">
         <button class="ghost" id="goGarage">Garage</button>
-        <button class="ghost" id="goTracks">Piste</button>
+        <button class="ghost" id="goTracks">Cambia pista</button>
         <button class="ghost" id="goBoard">Classifica</button>
         <button class="ghost" id="goLogout">Esci</button>
       </div>
+      <div class="ctrl-row">
+        <span>Sterzo</span>
+        <div class="opts" id="ctrlOpts" role="radiogroup" aria-label="Comandi di sterzo">
+          <button class="opt" data-ctrl="arrows" role="radio">Frecce</button>
+          <button class="opt" data-ctrl="tilt" role="radio">Inclina il telefono</button>
+        </div>
+      </div>
+      <button class="ghost wide" id="fsBtn" hidden>Schermo intero</button>
+      <p class="note" id="ctrlNote" hidden></p>
       <p class="note" id="homeNext"></p>
     </section>
 
@@ -115,7 +130,8 @@
 
     <!-- ===== Tracks ===== -->
     <section class="card center-card" id="scrTracks" hidden>
-      <h2>Piste</h2>
+      <h2>Pista infinita</h2>
+      <p class="note">Tocca una pista per sceglierla: è quella che corri con «Corri». Le gare a giri sono in «Gare in pista».</p>
       <div class="track-list" id="trackList"></div>
       <div class="actions"><button class="ghost" id="tBack">Box</button></div>
     </section>
@@ -123,7 +139,9 @@
     <!-- ===== Circuits ===== -->
     <section class="card center-card" id="scrCircuits" hidden>
       <h2>Gare in pista</h2>
-      <p class="note">Tu contro 5 piloti. Arriva tra i primi 3 per sbloccare il circuito successivo.</p>
+      <div class="champ" id="champBox"><p class="note">Carico il campionato…</p></div>
+      <h3>Gara singola</h3>
+      <p class="note">Scegli tu il circuito. Arriva tra i primi 3 per sbloccare il successivo.</p>
       <div class="track-list" id="circuitList"></div>
       <div class="actions"><button class="ghost" id="cBack">Box</button></div>
     </section>
@@ -141,6 +159,7 @@
     <!-- ===== Pause ===== -->
     <section class="card center-card" id="scrPause" hidden>
       <h2>In pausa</h2>
+      <p class="note" id="pauseNote" hidden>Se esci ora la tappa conta come ritiro: 0 punti e tempo di penalità.</p>
       <div class="actions"><button class="go" id="resume">Riprendi</button><button class="ghost" id="quit">Torna al box</button></div>
     </section>
 
@@ -156,6 +175,7 @@
       </div>
       <div class="save" id="oSave"></div>
       <ol class="order" id="oOrder" hidden></ol>
+      <div id="oChamp" hidden><h3 id="oChampTitle">Classifica campionato</h3><ol class="order" id="oChampList"></ol></div>
       <div class="unlocks" id="oUnlocks"></div>
       <div class="actions"><button class="go" id="again">Riparti</button><button class="ghost" id="toBox">Box</button></div>
       <div class="board"><h3 id="oBoardTitle">Top 10</h3><ol id="oBoard"></ol></div>

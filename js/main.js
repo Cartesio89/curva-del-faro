@@ -2,7 +2,7 @@ import * as THREE from "three";
 import {
   CARS, TRACKS, PARTS, PART_ORDER, COLORS, carById, trackById, cleanConfig, performance as perfOf,
   carUnlocked, trackUnlocked, unlockText, priceOf, ownsCar, ownsPart, coinsEarned,
-  CIRCUITS, circuitById, circuitUnlocked, prizeFor
+  CIRCUITS, circuitById, circuitUnlocked, prizeFor, AI_NAMES
 } from "./data.js";
 import { api, ERRORS } from "./api.js";
 import { Race } from "./race.js";
@@ -55,7 +55,7 @@ let garage = { sel: "lucciola", track: "costiera", cars: {} };
 let mode = "menu";                 // menu | race | paused | over
 let race = null;
 let garageIdx = 0;
-const input = { gas: false, brake: false, left: false, right: false };
+const input = { gas: false, brake: false, left: false, right: false, tilt: null };
 
 // saved configuration, restricted to what the player owns
 function cfgFor(car) {
@@ -68,7 +68,10 @@ let preview = null; // {car, key, value} — an option shown in the garage befor
 const selCar = () => { const c = carById(garage.sel); return carUnlocked(c, profile) && ownsCar(profile, c) ? c : CARS[0]; };
 const selTrack = () => { const t = trackById(garage.track); return trackUnlocked(t, profile) ? t : TRACKS[0]; };
 const SCREENS = ["scrLogin", "scrHome", "scrGarage", "scrTracks", "scrCircuits", "scrBoard", "scrPause", "scrOver"];
-function show(id) { for (const s of SCREENS) $(s).hidden = s !== id; }
+function show(id) {
+  for (const s of SCREENS) $(s).hidden = s !== id;
+  document.body.classList.toggle("racing", !id || id === "scrPause");
+}
 
 function setProfile(p, keepGarage) {
   profile = p;
@@ -161,6 +164,7 @@ function goHome() {
 $("goRace").addEventListener("click", () => startRace());
 $("goGarage").addEventListener("click", () => openGarage());
 $("goTracks").addEventListener("click", () => openTracks());
+$("homeTrackBtn").addEventListener("click", () => openTracks());
 $("goCircuits").addEventListener("click", () => openCircuits());
 $("goBoard").addEventListener("click", () => openBoard("endless"));
 $("goLogout").addEventListener("click", async () => {
@@ -348,7 +352,11 @@ function renderBoard(ol, rows, highlightName, kind) {
     const sub = document.createElement("small");
     const m = document.createElement("span"); m.className = "m";
     const t = document.createElement("span"); t.className = "t";
-    if (kind === "races") {
+    if (kind === "champ") {
+      sub.textContent = `${carById(r.car).name} · ${r.wins === 1 ? "1 vittoria" : r.wins + " vittorie"} di tappa`;
+      m.textContent = `${r.points} pt`;
+      t.textContent = fmtLap(Number(r.total_time));
+    } else if (kind === "races") {
       sub.textContent = `${r.circuits}/5 circuiti · ${r.races} gare`;
       m.textContent = `${r.points} pt`;
       t.textContent = r.wins === 1 ? "1 vittoria" : `${r.wins} vittorie`;
@@ -367,17 +375,18 @@ function renderBoard(ol, rows, highlightName, kind) {
 }
 // kind: "endless" | "races"; filter: track id / circuit id, or "" for the overall board
 async function openBoard(kind, filter = "") {
-  kind = kind === "races" ? "races" : "endless";
+  kind = kind === "races" || kind === "champ" ? kind : "endless";
   const tabs = $("boardTabs"); tabs.textContent = "";
-  for (const [k, label] of [["endless", "Pista infinita"], ["races", "Gare"]]) {
+  for (const [k, label] of [["endless", "Pista infinita"], ["races", "Gare"], ["champ", "Campionato"]]) {
     const b = document.createElement("button");
     b.className = "tab" + (k === kind ? " on" : ""); b.textContent = label; b.setAttribute("role", "tab");
     b.addEventListener("click", () => openBoard(k));
     tabs.appendChild(b);
   }
   const fl = $("boardFilters"); fl.textContent = "";
-  const opts = kind === "races"
-    ? [["", "Campionato"], ...CIRCUITS.map((c) => [c.id, c.name])]
+  const opts = kind === "champ" ? []
+    : kind === "races"
+    ? [["", "Generale"], ...CIRCUITS.map((c) => [c.id, c.name])]
     : [["", "Tutte le piste"], ...TRACKS.map((t) => [t.id, t.name])];
   for (const [id, label] of opts) {
     const b = document.createElement("button");
@@ -385,22 +394,98 @@ async function openBoard(kind, filter = "") {
     b.addEventListener("click", () => openBoard(kind, id));
     fl.appendChild(b);
   }
-  $("boardNote").textContent = kind === "races"
+  fl.hidden = kind === "champ";
+  $("boardNote").textContent = kind === "champ"
+    ? "I 10 migliori campionati conclusi: prima i punti totali delle 5 tappe, poi il tempo totale sommato."
+    : kind === "races"
     ? (filter ? "Le 10 migliori gare su questo circuito: prima il piazzamento, poi il tempo totale."
-              : "Campionato: per ogni circuito conta il miglior arrivo di ciascun pilota (25, 18, 15, 12, 10, 8 punti dal 1° al 6°).")
+              : "Generale: per ogni circuito conta il miglior arrivo di ciascun pilota (25, 18, 15, 12, 10, 8 punti dal 1° al 6°).")
     : (filter ? "I 10 migliori risultati su questa pista." : "I 10 migliori risultati su tutte le piste.");
   show("scrBoard");
   const ol = $("boardList");
   ol.innerHTML = '<li class="empty">Carico…</li>';
   let rows, k;
-  if (kind === "races") { rows = filter ? await api.topCircuit(filter) : await api.topRaces(); k = filter ? "circuit" : "races"; }
+  if (kind === "champ") { rows = await api.topChamp(); k = "champ"; }
+  else if (kind === "races") { rows = filter ? await api.topCircuit(filter) : await api.topRaces(); k = filter ? "circuit" : "races"; }
   else { rows = await api.topEndless(filter || null); k = "endless"; }
   renderBoard(ol, rows, profile && profile.name, k);
 }
 $("bBack").addEventListener("click", goHome);
 
 // ------------------------------------------------------------------ circuits
+// ------------------------------------------------------------------ championship
+// One stage per circuit, in order, against the same 5 rivals. State lives on the server (any device).
+const CH_POINTS = [25, 18, 15, 12, 10, 8];
+let champ = null;
+function champStandings(ch) {
+  const tab = new Map();
+  const add = (name, isPlayer, pts, time) => {
+    const r = tab.get(name) || { name, isPlayer, points: 0, time: 0, wins: 0 };
+    r.points += pts; r.time += time || 0; if (pts === 25) r.wins++;
+    tab.set(name, r);
+  };
+  for (const f of ch.field) add(f.n, false, 0, 0);
+  add(profile.name, true, 0, 0);
+  for (const st of ch.results) (st.order || []).forEach((o, i) => add(o.p ? profile.name : o.n, !!o.p, o.p ? st.points : CH_POINTS[i] || 0, o.p ? st.time : o.t));
+  return [...tab.values()].sort((a, b) => b.points - a.points || b.wins - a.wins || a.time - b.time);
+}
+function standingsList(ol, rows) {
+  ol.textContent = "";
+  rows.forEach((r, i) => {
+    const li = document.createElement("li"); if (r.isPlayer) li.className = "me";
+    const pos = document.createElement("b"); pos.textContent = `${i + 1}.`;
+    const nm = document.createElement("span"); nm.className = "on"; nm.textContent = r.name;
+    const sm = document.createElement("small"); sm.textContent = r.wins ? ` · ${r.wins === 1 ? "1 vittoria" : r.wins + " vittorie"}` : ""; nm.appendChild(sm);
+    const pt = document.createElement("span"); pt.className = "ot"; pt.textContent = `${r.points} pt`;
+    li.append(pos, nm, pt); ol.appendChild(li);
+  });
+}
+function renderChampBox() {
+  const box = $("champBox"); box.textContent = "";
+  const h = document.createElement("h3"); h.textContent = "Campionato";
+  const p = document.createElement("p"); p.className = "note";
+  box.append(h, p);
+  const act = document.createElement("div"); act.className = "actions";
+  if (champ && !champ.done) {
+    const c = circuitById(champ.next), car = carById(champ.car);
+    p.textContent = `Tappa ${champ.stage + 1} di 5: ${c.name}, ${c.laps} giri. Con ${car.name}. Hai ${champ.points} punti, tempo totale ${fmtLap(Number(champ.total_time))}.`;
+    const ol = document.createElement("ol"); ol.className = "order"; standingsList(ol, champStandings(champ)); box.appendChild(ol);
+    const go = document.createElement("button"); go.className = "go"; go.textContent = `Corri la tappa ${champ.stage + 1}`;
+    go.addEventListener("click", () => startChampStage());
+    const re = document.createElement("button"); re.className = "ghost"; re.textContent = "Ricomincia";
+    re.addEventListener("click", () => newChamp());
+    act.append(go, re);
+  } else {
+    p.textContent = `5 tappe, una per circuito, contro gli stessi 5 piloti. Punti a ogni tappa: ${CH_POINTS.join(", ")}. In classifica contano i punti totali, poi il tempo totale. Corri con l'auto scelta ora: ${selCar().name}.`;
+    const go = document.createElement("button"); go.className = "go"; go.textContent = "Nuovo campionato";
+    go.addEventListener("click", () => newChamp());
+    act.append(go);
+  }
+  box.appendChild(act);
+}
+async function loadChamp() {
+  const r = await api.champCurrent(token);
+  champ = r && r.champ ? r.champ : null;
+  if (!$("scrCircuits").hidden) renderChampBox();
+  if (r && r.error === "network") $("champBox").querySelector(".note").textContent = ERRORS.network;
+}
+async function newChamp() {
+  const car = selCar();
+  const field = AI_NAMES.slice().sort(() => Math.random() - 0.5).slice(0, 5).map((n) => ({ n }));
+  $("champBox").querySelector(".note").textContent = "Preparo il campionato…";
+  const r = await api.champStart(token, car.id, field);
+  if (r && r.champ) { champ = r.champ; startChampStage(); }
+  else $("champBox").querySelector(".note").textContent = ERRORS[r && r.error] || "Campionato non avviato.";
+}
+function startChampStage() {
+  if (!champ || champ.done) return openCircuits();
+  const car = carById(champ.car);
+  startCircuit(circuitById(champ.next), { champ, car });
+}
+
 function openCircuits() {
+  renderChampBox();
+  loadChamp();
   const list = $("circuitList"); list.textContent = "";
   for (const c of CIRCUITS) {
     const ok = circuitUnlocked(c, profile);
@@ -436,12 +521,13 @@ function setHudLabels(circuit) {
   $("cpChip").hidden = circuit; $("lapChip").hidden = !circuit; $("cCoins").hidden = circuit;
   const h = $("hint"); h.className = "hint"; h.textContent = "Tieni premuto GAS";
 }
-function startCircuit(c) {
+function startCircuit(c, ch) {
   endRace();
-  const car = selCar();
-  race = new CircuitRace(renderer, trackById(c.theme), c, car, cfgFor(car), circuitHooks, { mobile, playerName: profile.name });
+  const car = ch ? ch.car : selCar();
+  race = new CircuitRace(renderer, trackById(c.theme), c, car, cfgFor(car), circuitHooks,
+    { mobile, playerName: profile.name, aiNames: ch ? ch.champ.field.map((f) => f.n) : null });
   race.setAspect(W, H);
-  race.meta = { car, circuit: c, kind: "circuit" };
+  race.meta = { car, circuit: c, kind: "circuit", champ: ch ? ch.champ : null };
   setHudLabels(true);
   mode = "race";
   show(null);
@@ -469,12 +555,16 @@ async function finishCircuit(st) {
     li.append(pos, nm, tm); ord.appendChild(li);
   });
   $("oUnlocks").textContent = "";
-  $("oBoardTitle").textContent = "Top 10 · Gare";
   $("oBoard").innerHTML = "";
+  $("oChamp").hidden = true;
+  const ch = race.meta.champ;
+  $("again").textContent = ch ? "Prossima tappa" : "Riparti";
+  $("oBoardTitle").textContent = ch ? "Top 10 · Campionato" : "Top 10 · Gare";
   show("scrOver");
   $("again").focus({ preventScroll: true });
   const save = $("oSave");
   save.textContent = "Salvo la gara…";
+  if (ch) return finishChampStage(st, ch, save);
   const r = await api.submitCircuit(token, circuit.id, car.id, st.position, Math.round(st.time * 10) / 10, Math.round(st.best * 10) / 10);
   if (r && r.profile) {
     setProfile(r.profile, true);
@@ -485,6 +575,50 @@ async function finishCircuit(st) {
     if (r && r.error === "no_session") { token = null; store.del("faro-token"); }
   }
   renderBoard($("oBoard"), await api.topRaces(), profile && profile.name, "races");
+}
+
+// compact finishing order for the championship record: name, player flag, time
+function champOrder(order, position) {
+  const o = order.map((x) => ({ n: x.name.slice(0, 14), p: x.isPlayer ? 1 : 0, t: Math.round(x.time * 10) / 10 }));
+  const me = o.findIndex((x) => x.p);
+  if (me >= 0 && me !== position - 1) { const [m] = o.splice(me, 1); o.splice(position - 1, 0, m); }
+  return o;
+}
+async function finishChampStage(st, ch, save) {
+  const r = await api.champStage(token, ch.id, st.position, Math.round(st.time * 10) / 10, Math.round(st.best * 10) / 10, champOrder(st.order, st.position));
+  if (!(r && r.champ)) {
+    save.textContent = (ERRORS[r && r.error] || "Tappa non salvata.") + " Puoi rifare la tappa.";
+    if (r && r.error === "no_session") { token = null; store.del("faro-token"); }
+    $("again").textContent = "Rifai la tappa";
+    return;
+  }
+  setProfile(r.profile, true);
+  champ = r.champ;
+  showChampTable(st.position);
+  save.textContent = `Tappa salvata: +${CH_POINTS[st.position - 1]} punti, +${fmtC(r.earned)}.`;
+}
+function showChampTable(lastPos) {
+  const rows = champStandings(champ);
+  const me = rows.findIndex((x) => x.isPlayer) + 1;
+  $("oChamp").hidden = false;
+  $("oChampTitle").textContent = champ.done ? `Campionato concluso: sei ${me}° con ${champ.points} punti` : `Campionato dopo ${champ.stage} tappe su 5`;
+  standingsList($("oChampList"), rows);
+  if (champ.done) {
+    $("oTitle").textContent = me === 1 ? "Campione!" : `Campionato: ${me}°`;
+    $("again").textContent = "Nuovo campionato";
+    api.topChamp().then((rows2) => renderBoard($("oBoard"), rows2, profile && profile.name, "champ"));
+  } else {
+    $("again").textContent = `Tappa ${champ.stage + 1}: ${circuitById(champ.next).name}`;
+  }
+}
+// leaving a championship stage early counts as retiring: 6th, 0 points, time penalty
+async function retireChampStage() {
+  const ch = race.meta.champ;
+  const order = race.cars.slice().sort((a, b) => b.s - a.s).filter((c) => !c.isPlayer)
+    .map((c) => ({ n: c.name.slice(0, 14), p: 0, t: null }));
+  order.push({ n: profile.name.slice(0, 14), p: 1, t: null });
+  const r = await api.champStage(token, ch.id, null, null, null, order, true);
+  if (r && r.champ) { champ = r.champ; if (r.profile) setProfile(r.profile, true); }
 }
 
 // short description of an AI setup: only the non-stock parts
@@ -527,7 +661,7 @@ async function finishRun(st) {
   $("oTitle").textContent = "Tempo scaduto";
   $("oDist").textContent = st.distance.toLocaleString("it-IT"); $("oUnit").textContent = "m";
   $("oL1").textContent = "Tempo"; $("oL2").textContent = "Traguardi"; $("oL3").textContent = "Scarti"; $("oL4").textContent = "Botti";
-  $("oOrder").hidden = true;
+  $("oOrder").hidden = true; $("oChamp").hidden = true; $("again").textContent = "Riparti";
   $("oTime").textContent = Math.round(st.time) + " s";
   $("oCp").textContent = st.cps; $("oNear").textContent = st.near; $("oHit").textContent = st.crashes;
   $("oUnlocks").textContent = "";
@@ -553,13 +687,23 @@ async function finishRun(st) {
   }
   renderBoard($("oBoard"), await api.topEndless(), profile && profile.name, "endless");
 }
-function pause() { if (mode !== "race") return; mode = "paused"; clearInput(); show("scrPause"); $("resume").focus({ preventScroll: true }); }
+function pause() {
+  if (mode !== "race") return;
+  mode = "paused"; clearInput();
+  $("pauseNote").hidden = !(race && race.meta.champ && race.state !== "finished");
+  show("scrPause"); $("resume").focus({ preventScroll: true });
+}
 function resume() { if (mode !== "paused") return; show(null); mode = "race"; }
 $("pauseBtn").addEventListener("click", pause);
 $("resume").addEventListener("click", resume);
-$("quit").addEventListener("click", goHome);
+$("quit").addEventListener("click", async () => {
+  const retire = race && race.meta.champ && race.state !== "finished";
+  if (retire) { await retireChampStage(); endRace(); openCircuits(); return; }
+  goHome();
+});
 $("again").addEventListener("click", () => {
   if (!token) { showLogin(ERRORS.no_session); return; }
+  if (race && race.meta.champ) { if (champ && champ.done) newChamp(); else startChampStage(); return; }
   if (race && race.meta.kind === "circuit") startCircuit(race.meta.circuit); else startRace();
 });
 $("toBox").addEventListener("click", () => { if (!token) { showLogin(ERRORS.no_session); return; } goHome(); });
@@ -666,6 +810,91 @@ function bindPad(btn, key) {
 bindPad($("bG"), "gas"); bindPad($("bB"), "brake"); bindPad($("bL"), "left"); bindPad($("bR"), "right");
 stage.addEventListener("contextmenu", (e) => e.preventDefault());
 
+// ------------------------------------------------------------------ tilt steering + fullscreen
+// Steering by tilting the phone like a wheel. The angle comes from gravity seen in the screen's own axes,
+// so it works in portrait and both landscapes, held upright or leaned back. Level phone = straight.
+let ctrl = store.get("faro-ctrl") === "tilt" ? "tilt" : "arrows";
+let tiltOk = false, tiltListening = false, tiltAngle = 0;
+const TILT_FULL = 22 * Math.PI / 180, TILT_DEAD = 2.5 * Math.PI / 180;
+function onOrient(e) {
+  if (e.beta == null || e.gamma == null) return;
+  const b = e.beta * Math.PI / 180, g = e.gamma * Math.PI / 180;
+  const gx = Math.cos(b) * Math.sin(g), gy = -Math.sin(b);              // gravity in the device's x/y axes
+  const ang = ((screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0) * Math.PI / 180;
+  const gxs = gx * Math.cos(ang) - gy * Math.sin(ang);                  // ...along the screen's horizontal axis
+  tiltAngle = Math.asin(Math.max(-1, Math.min(1, gxs)));
+  tiltOk = true;
+}
+function listenTilt() {
+  if (tiltListening) return;
+  tiltListening = true;
+  addEventListener("deviceorientation", onOrient);
+}
+// must run inside a tap: iPhone asks for permission to read the motion sensors
+function askTilt() {
+  const D = window.DeviceOrientationEvent;
+  if (!D) return Promise.resolve(false);
+  if (typeof D.requestPermission === "function") {
+    return D.requestPermission().then((r) => { if (r === "granted") { listenTilt(); return true; } return false; }).catch(() => false);
+  }
+  listenTilt();
+  return Promise.resolve(true);
+}
+function tiltSteer() {
+  if (ctrl !== "tilt" || !tiltOk) return null;
+  let a = tiltAngle;
+  if (Math.abs(a) < TILT_DEAD) return 0;
+  a -= Math.sign(a) * TILT_DEAD;
+  return Math.max(-1, Math.min(1, a / (TILT_FULL - TILT_DEAD)));
+}
+function renderCtrl(msg) {
+  document.querySelectorAll("#ctrlOpts .opt").forEach((b) => { const on = b.dataset.ctrl === ctrl; b.classList.toggle("on", on); b.setAttribute("aria-checked", on); });
+  const n = $("ctrlNote");
+  n.textContent = msg || (ctrl === "tilt" ? "Gira il telefono come un volante. Telefono dritto = auto dritta." : "");
+  n.hidden = !n.textContent;
+  document.body.classList.toggle("tilt-mode", ctrl === "tilt" && tiltOk);
+}
+document.querySelectorAll("#ctrlOpts .opt").forEach((b) => b.addEventListener("click", () => {
+  if (b.dataset.ctrl === "arrows") { ctrl = "arrows"; store.set("faro-ctrl", ctrl); renderCtrl(); return; }
+  askTilt().then((ok) => {
+    if (!ok) { ctrl = "arrows"; renderCtrl("Il telefono non dà accesso al giroscopio: restano le frecce."); return; }
+    ctrl = "tilt"; store.set("faro-ctrl", ctrl);
+    renderCtrl("Attivo il giroscopio…");
+    setTimeout(() => { if (ctrl === "tilt" && !tiltOk) { ctrl = "arrows"; store.set("faro-ctrl", ctrl); renderCtrl("Nessun giroscopio trovato su questo dispositivo: restano le frecce."); } else renderCtrl(); }, 1200);
+  });
+}));
+// on a reload the permission must be asked again with a tap (iPhone): do it on the first tap anywhere
+if (ctrl === "tilt") {
+  const D = window.DeviceOrientationEvent;
+  if (D && typeof D.requestPermission === "function") addEventListener("pointerup", () => askTilt().then(() => renderCtrl()), { once: true });
+  else listenTilt();
+  setTimeout(() => renderCtrl(), 1500);
+}
+
+const fsEl = document.documentElement;
+const fsCan = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+const fsOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+async function toggleFull() {
+  try {
+    if (fsOn()) { if (document.exitFullscreen) await document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); return; }
+    if (fsEl.requestFullscreen) await fsEl.requestFullscreen({ navigationUI: "hide" }); else if (fsEl.webkitRequestFullscreen) fsEl.webkitRequestFullscreen();
+    if (mobile && screen.orientation && screen.orientation.lock) await screen.orientation.lock("landscape").catch(() => {});
+  } catch (e) { /* refused by the browser: nothing to do */ }
+}
+function renderFs() {
+  $("fsBtn").hidden = !fsCan; $("fsChip").hidden = !fsCan || !mobile;
+  $("fsBtn").textContent = fsOn() ? "Esci da schermo intero" : "Schermo intero (orizzontale)";
+}
+$("fsBtn").addEventListener("click", toggleFull);
+$("fsChip").addEventListener("click", toggleFull);
+document.addEventListener("fullscreenchange", renderFs);
+document.addEventListener("webkitfullscreenchange", renderFs);
+renderFs(); renderCtrl();
+if (!fsCan && mobile) {
+  const n = $("ctrlNote");
+  if (!n.textContent) { n.textContent = "Per giocare a tutto schermo: Condividi → Aggiungi alla schermata Home, poi apri il gioco da lì."; n.hidden = false; }
+}
+
 // ------------------------------------------------------------------ loop
 let last = performance.now(), acc = 0;
 function frame(now) {
@@ -673,6 +902,7 @@ function frame(now) {
   if (race && (mode === "race" || mode === "over")) {
     showroom.active = false;
     acc += dt;
+    input.tilt = tiltSteer();
     while (acc >= STEP) { race.update(STEP, input); acc -= STEP; }
     race.render(dt, now);
     updateHud();

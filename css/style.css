@@ -209,3 +209,46 @@ input:focus { outline: none; border-color: var(--amber); }
 .rear-btn { left: 10px; right: auto; top: 270px; }
 .rear-btn.nomap { top: 150px; }
 @media (min-width: 761px) { .rear-btn { top: 280px; } .rear-btn.nomap { top: 120px; } }
+
+/* Home: track is a button, steering choice */
+.pick-btn { border: 2px dashed var(--line); background: transparent; color: var(--ink); border-radius: 10px; padding: 4px 6px; cursor: pointer; font: inherit; }
+.pick-btn:hover, .pick-btn:focus-visible { border-color: var(--amber); }
+.ctrl-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ctrl-row > span { font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim); }
+body.tilt-mode .btn-steer { display: none; }
+
+/* Championship */
+.champ { display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.champ .order, #oChamp .order { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.champ .actions { margin-top: 2px; }
+#oChamp { display: grid; gap: 6px; }
+
+/* Phone held sideways (or any short screen): give the road the whole height */
+@media (max-height: 520px) and (orientation: landscape) {
+  body.racing header { display: none; }
+  body.racing .app { padding: 0 env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px); gap: 0; }
+  body.racing .stage { border-radius: 0; }
+  .app { padding-block: 6px 6px; gap: 6px; }
+  h1 { font-size: 20px; }
+  .hud { inset: 6px 8px auto 8px; }
+  .gauge { padding: 4px 9px 5px; }
+  .gauge small { font-size: 10px; margin-bottom: 1px; }
+  .gauge strong { font-size: 24px; }
+  .gauge em { font-size: 12px; }
+  .sub { top: 56px; left: 110px; right: 110px; }
+  .chip { font-size: 12px; padding: 2px 9px; }
+  .minimap { top: 62px; width: 92px; height: 92px; }
+  .rear-btn { top: 160px; width: 42px; height: 42px; }
+  .rear-btn.nomap { top: 62px; }
+  .controls { padding: 8px 10px; }
+  .btn-steer { width: 62px; height: 62px; }
+  .btn-gas { width: 80px; height: 96px; }
+  .btn-brake { width: 62px; height: 66px; }
+  .hint { top: 40%; font-size: 16px; padding: 6px 12px; }
+  .toast { top: 32%; }
+  .card { padding: 12px; gap: 8px; }
+  .card h2 { font-size: 24px; }
+  .center-card { max-height: calc(100% - 12px); }
+  .side-card { top: 6px; bottom: 6px; }
+  .big-go { padding-block: 8px; }
+}

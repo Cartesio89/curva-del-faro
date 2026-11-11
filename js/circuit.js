@@ -49,7 +49,7 @@ export class CircuitRace {
     // skill = share of the grip limit the AI dares to use (1 = perfect driver). Calibrated on real laps:
     // a good human with a tuned car is around 0.65-0.70. Each circuit asks a bit more.
     const skill0 = [0.56, 0.58, 0.6, 0.62, 0.64][Math.max(0, CIRCUITS.indexOf(circuit))];
-    const names = AI_NAMES.slice().sort(() => Math.random() - 0.5);
+    const names = opts && Array.isArray(opts.aiNames) && opts.aiNames.length === 5 ? opts.aiNames.slice().sort(() => Math.random() - 0.5) : AI_NAMES.slice().sort(() => Math.random() - 0.5);
     this.cars = [];
     for (let j = 0; j < 5; j++) {
       const rel = level * rnd(0.98, 1.04) * (j === 0 ? 1.01 : 1); // slot 0 is the pace-setter
@@ -106,7 +106,8 @@ export class CircuitRace {
   drivePlayer(c, dt, input) {
     const p = c.perf, tr = this.track;
     const k = this.world.sample(c.s + 0.5).k;
-    c.steerSm = smoothSteer(c.steerSm || 0, (input.right ? 1 : 0) - (input.left ? 1 : 0), dt);
+    if (input.tilt != null) c.steerSm = (c.steerSm || 0) + (input.tilt - (c.steerSm || 0)) * Math.min(1, dt * 12);
+    else c.steerSm = smoothSteer(c.steerSm || 0, (input.right ? 1 : 0) - (input.left ? 1 : 0), dt);
     const st = stepCar(c, k, c.steerSm, { gas: input.gas, brake: input.brake, G: p.grip * tr.grip * GRIP_ARCADE,
       top: p.topMs * this.draft(c), a0: p.a0, offroad: tr.offroad }, dt);
     this.barrier(c);

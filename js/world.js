@@ -406,7 +406,7 @@ export class World {
       const d = this.difficulty(s);
       const nearCp = this.cpS(this.cpAround(s)) - s;
       if (Math.abs(nearCp) > 40) {
-        const weights = [["clock", 18], ["turbo", 18], ["shield", 12], ["oil", 16 + 16 * d], ["cones", 14 + 18 * d]];
+        const weights = [["clock", 18], ["turbo", 18], ["shield", 12], ["oil", 16 + 16 * d], ["cones", 6 + 8 * d]];
         const tot = weights.reduce((a, w) => a + w[1], 0);
         let roll = Math.random() * tot, type = "clock";
         for (const [t, w] of weights) if ((roll -= w) < 0) { type = t; break; }

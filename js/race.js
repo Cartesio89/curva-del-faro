@@ -102,7 +102,8 @@ export class Race {
       if (this.slip > 0) { this.slip -= dt; steerTarget = this.slipDir * 0.6; }
       else steerTarget = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     }
-    this.steerSm = smoothSteer(this.steerSm || 0, steerTarget, dt);
+    if (live && !(this.slip > 0) && input.tilt != null) this.steerSm = (this.steerSm || 0) + (input.tilt - (this.steerSm || 0)) * Math.min(1, dt * 12);
+    else this.steerSm = smoothSteer(this.steerSm || 0, steerTarget, dt);
     const steer = this.steerSm;
     const car = this.body || (this.body = { v: 0, x: 0, phi: 0, latV: 0 });
     car.v = this.v; car.x = this.x;
@@ -187,7 +188,10 @@ export class Race {
     else if (type === "turbo") { this.turbo = 4; h.onToast("Turbo!", "good"); }
     else if (type === "shield") { this.shield = 1; h.onToast("Scudo attivo", "good"); }
     else if (type === "oil") { this.slip = 1.2; this.slipDir = Math.random() < 0.5 ? -1 : 1; h.onToast("Olio!", "bad"); }
-    else if (type === "cones") { this.v *= 0.45; this.shake = 0.35; h.onToast("Cantiere!", "bad"); }
+    else if (type === "cones") {
+      if (this.shield > 0) { this.shield = 0; this.ghost = Math.max(this.ghost, 0.6); this.shake = 0.15; h.onToast("Scudo: cantiere evitato", "good"); }
+      else { this.v *= 0.45; this.shake = 0.35; h.onToast("Cantiere!", "bad"); }
+    }
   }
 
   updateTraffic(dt) {
