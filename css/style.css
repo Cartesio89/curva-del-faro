@@ -268,3 +268,20 @@ body.tilt-mode .btn-steer { display: none; }
 .big-opts .opt { padding: 12px 8px; font-size: 17px; font-weight: 700; }
 .big-opts .opt small { color: var(--ink-dim); font-weight: 500; margin-top: 4px; }
 .pre h3 { margin: 4px 0 0; }
+
+/* Garage stats: grey = factory car, green = gained by parts, red = lost by parts */
+.bar .track-bar { position: relative; overflow: hidden; }
+.bar .seg { position: absolute; top: 0; bottom: 0; }
+.bar .seg.base { background: #8f8a99; border-radius: 4px 0 0 4px; }
+.bar .seg.gain { background: #3ccf7e; }
+.bar .seg.loss { background: repeating-linear-gradient(135deg, #e0574a 0 4px, rgba(224,87,74,0.45) 4px 8px); }
+.bar b small.vsnow { display: block; color: #6fb8ff; font-weight: 600; }
+.cmp { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.cmp .lg { display: inline-block; width: 14px; height: 8px; border-radius: 2px; margin-left: 6px; }
+.cmp .lg:first-child { margin-left: 0; }
+.cmp .lg.base { background: #8f8a99; } .cmp .lg.gain { background: #3ccf7e; } .cmp .lg.loss { background: #e0574a; }
+.cmp .trying { color: #6fb8ff; flex-basis: 100%; }
+.cmp > span { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.cmp .lg { margin-left: 0; }
+.bar { grid-template-columns: 70px minmax(0, 1fr) 118px; }
+.bar b small { font-size: 11px; line-height: 1.25; white-space: nowrap; }

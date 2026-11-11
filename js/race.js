@@ -92,6 +92,7 @@ export class Race {
   // ------------------------------------------------------------------ step
   update(dt, input) {
     this.lastInput = input;
+    if (this.fall) return this.updateFall(dt);
     const live = this.state === "run";
     if (this.state === "ready" && input.gas) { this.state = "run"; this.hooks.onStart && this.hooks.onStart(); }
     const tr = this.track, p = this.perf;
@@ -127,6 +128,13 @@ export class Race {
     this.updateTraffic(dt);
     this.world.update(this.s);
 
+    // off the edge where the ground is far below (the road runs over a gap, like a bridge): the car falls
+    if (live && Math.abs(this.x) > ROAD_HALF + 1.1 && this.world.dropAt(this.s, this.x) > 2.5) {
+      this.fall = { t: 0, vy: 0, y0: this.world.sample(this.s, 0).y }; this.fallY = 0;
+      this.hooks.onToast("Volo!", "bad");
+      return;
+    }
+
     if (live) {
       // checkpoints
       const nextCp = START_S + CP_FIRST + CP_GAP * this.cpReached;
@@ -149,11 +157,13 @@ export class Race {
         const ds = t.s - me.s, dx = Math.abs(t.x - me.x);
         const reachS = (t.len + myLen) / 2 - 0.15, reachX = (t.wid + myW) / 2 - 0.08;
         const overlap = Math.abs(ds) < reachS && dx < reachX;
+        if (overlap) t.touched = true;                       // any touch, even a light one, cancels the near miss
         if (overlap && this.ghost > 0) this.ghost = Math.max(this.ghost, 0.15); // stay ghosted until clear of the car
-        if (overlap && !(this.ghost > 0)) {
+        if (overlap && !(this.ghost > 0) && !t.shielded) {
+          // one shield per car: it is used up on this car, which you then pass through
           if (this.shield > 0 && !t.contact) {
-            this.shield = 0; this.ghost = 1.2; t.hit = true;
-            this.hooks.onToast("Scudo!", "good");
+            this.shield--; t.shielded = true; t.hit = true;
+            this.hooks.onToast(this.shield ? `Scudo! (ne restano ${this.shield})` : "Scudo!", "good");
           } else {
             const rel = resolveContact(me, t, ds, reachS, reachX, dt);
             if (!t.contact && rel > 2.5) {
@@ -163,9 +173,22 @@ export class Race {
             t.contact = true;
           }
         } else if (t.contact && (Math.abs(ds) > reachS + 0.6 || dx > reachX + 0.3)) t.contact = false;
+        // NEAR MISS (scarto), one precise rule:
+        //  1. the car was ahead of you and you overtake it (it ends up behind you);
+        //  2. while side by side, the free space between the two bodies got down to 1 m or less;
+        //  3. you never touched it (no contact, no shield used on it);
+        //  4. you were at least 10 km/h faster than it at that moment.
+        //  -> +0,5 s, at most once per car.
+        if (ds > reachS) t.wasAhead = true;
+        if (Math.abs(ds) < reachS + 0.5) {
+          const gap = dx - reachX;
+          if (gap < (t.minGap ?? Infinity)) { t.minGap = gap; t.dvAtGap = me.v - t.v; }
+        }
         if (!t.passed && ds < -reachS) {
           t.passed = true;
-          if (!t.hit && dx < reachX + 1.4 && me.v > t.v * 1.1) { this.near++; this.timeLeft += 0.5; this.hooks.onToast("Scarto +0,5 s", "good"); }
+          if (t.wasAhead && !t.touched && !t.shielded && t.minGap != null && t.minGap <= 1.0 && t.dvAtGap >= 10 / 3.6) {
+            this.near++; this.timeLeft += 0.5; this.hooks.onToast("Scarto +0,5 s", "good");
+          }
         }
       }
       this.s = me.s; this.x = me.x; this.v = me.v;
@@ -186,10 +209,10 @@ export class Race {
     if (type === "coin") { this.coins++; h.onCoin && h.onCoin(this.coins); }
     else if (type === "clock") { this.timeLeft += 3; h.onToast("+3 s", "good"); }
     else if (type === "turbo") { this.turbo = 4; h.onToast("Turbo!", "good"); }
-    else if (type === "shield") { this.shield = 1; h.onToast("Scudo attivo", "good"); }
+    else if (type === "shield") { this.shield++; h.onToast(this.shield > 1 ? `Scudi: ${this.shield}` : "Scudo attivo", "good"); }
     else if (type === "oil") { this.slip = 1.2; this.slipDir = Math.random() < 0.5 ? -1 : 1; h.onToast("Olio!", "bad"); }
     else if (type === "cones") {
-      if (this.shield > 0) { this.shield = 0; this.ghost = Math.max(this.ghost, 0.6); this.shake = 0.15; h.onToast("Scudo: cantiere evitato", "good"); }
+      if (this.shield > 0) { this.shield--; this.shake = 0.15; h.onToast(this.shield ? `Cantiere evitato (scudi: ${this.shield})` : "Scudo: cantiere evitato", "good"); }
       else { this.v *= 0.45; this.shake = 0.35; h.onToast("Cantiere!", "bad"); }
     }
   }
@@ -246,9 +269,9 @@ export class Race {
     const tmp = {};
     // player
     w.sample(this.s, this.x, tmp);
-    const roadY = w.terrainY(this.s, this.x);
     const P = this.player;
-    P.position.set(tmp.x, Math.abs(this.x) > ROAD_HALF + 0.7 ? roadY : tmp.y, tmp.z);
+    const offY = Math.abs(this.x) > ROAD_HALF + 0.7 ? w.groundAt(this.s, this.x) : tmp.y;
+    P.position.set(tmp.x, this.fall ? this.fall.y0 + this.fallY : offY, tmp.z);
     let roll = -this.latV * 0.006;
     if (this.shake > 0) { P.position.x += rnd(-0.06, 0.06); P.position.y += rnd(0, 0.06); roll += rnd(-0.03, 0.03); }
     P.rotation.set(-tmp.slope, tmp.heading + this.yaw, roll, "YXZ");
@@ -307,6 +330,26 @@ export class Race {
     this.renderer.render(this.scene, this.camera);
   }
 
+  // falling off the edge: about a second in the air, then back on the road centre, standing still
+  updateFall(dt) {
+    const f = this.fall;
+    f.t += dt; f.vy += 9.8 * dt; this.fallY -= f.vy * dt;
+    this.s += this.v * dt * 0.7; this.x += Math.sign(this.x) * this.v * dt * 0.12; this.v *= Math.pow(0.5, dt);
+    this.updateTraffic(dt);
+    this.world.update(this.s);
+    this.elapsed += dt; this.timeLeft -= dt;
+    if (f.t > 1.3 || this.timeLeft <= 0) {
+      this.fall = null; this.fallY = 0;
+      this.x = 0; this.v = 0; this.yaw = 0; this.steerSm = 0; this.latV = 0;
+      this.body = { v: 0, x: 0, phi: 0, latV: 0 };
+      this.ghost = 2;                                   // no instant crash into a car while restarting
+      if (this.timeLeft <= 0) {
+        this.timeLeft = 0; this.state = "over";
+        this.hooks.onFinish({ distance: Math.floor(this.maxS - START_S), time: this.elapsed, cps: this.cpReached, near: this.near, crashes: this.crashes, coins: this.coins });
+      } else this.hooks.onToast("Riparti da centro pista", "bad");
+    }
+  }
+
   // what the sound engine needs this frame
   audioState(input) {
     const v = this.state === "run" || this.state === "ready" ? this.v : 0;
@@ -323,7 +366,7 @@ export class Race {
     const toCp = Math.max(0, Math.ceil(START_S + CP_FIRST + CP_GAP * this.cpReached - this.s));
     return {
       kmh: Math.round(this.v * 3.6), dist: Math.floor(this.maxS - START_S), time: this.timeLeft, toCp,
-      corner: this.world.nextCorner(this.s), coins: this.coins, turbo: this.turbo, shield: this.shield > 0, slip: this.slip > 0 && this.state === "run",
+      corner: this.world.nextCorner(this.s), coins: this.coins, turbo: this.turbo, shield: this.shield, slip: this.slip > 0 && this.state === "run",
       off: this.state === "run" && Math.abs(this.x) > ROAD_HALF + 0.6, state: this.state
     };
   }

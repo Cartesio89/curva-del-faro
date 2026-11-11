@@ -182,16 +182,21 @@ function openGarage() {
   show("scrGarage");
 }
 // value bar with a tick at the reference value and the difference in numbers
-function statBar(label, frac, refFrac, text, delta, good, refLabel) {
+// One stat: the grey part is the car as it leaves the factory (never moves for a given car);
+// green = what your parts add on top, red = what they take away. The numbers say by how much.
+function statBar(label, frac, baseFrac, text, delta, good, extra) {
   const row = document.createElement("div"); row.className = "bar";
   const a = document.createElement("span"); a.textContent = label;
   const t = document.createElement("span"); t.className = "track-bar";
-  const clampF = (f) => Math.max(0.04, Math.min(1, f));
-  const f = document.createElement("span"); f.className = "fill"; f.style.width = Math.round(clampF(frac) * 100) + "%"; f.style.display = "block";
-  t.appendChild(f);
-  if (refFrac != null) { const tick = document.createElement("i"); tick.className = "tick"; tick.style.left = Math.round(clampF(refFrac) * 100) + "%"; t.appendChild(tick); }
+  const cf = (f) => Math.max(0.04, Math.min(1, f));
+  const now = cf(frac), base = cf(baseFrac);
+  const seg = (cls, from, to) => { const e = document.createElement("span"); e.className = "seg " + cls; e.style.left = (from * 100).toFixed(1) + "%"; e.style.width = (Math.max(0, to - from) * 100).toFixed(1) + "%"; return e; };
+  t.appendChild(seg("base", 0, Math.min(now, base)));
+  if (now > base + 0.002) t.appendChild(seg("gain", base, now));
+  if (now < base - 0.002) t.appendChild(seg("loss", now, base));
   const b = document.createElement("b"); b.textContent = text;
-  if (delta) { const d = document.createElement("small"); d.className = good ? "up" : "down"; d.textContent = delta; b.appendChild(d); }
+  if (delta) { const d = document.createElement("small"); d.className = good ? "up" : "down"; d.textContent = delta + " vs serie"; b.appendChild(d); }
+  if (extra) { const d = document.createElement("small"); d.className = "vsnow"; d.textContent = extra; b.appendChild(d); }
   row.append(a, t, b);
   return row;
 }
@@ -205,17 +210,24 @@ function effectText(key, value) {
   if (o.grip && o.grip !== 1) bits.push(`tenuta ${pct(o.grip)}`);
   return bits.length ? bits.join(", ") : "solo estetica";
 }
-function perfBars(car, cfg, refCfg, refLabel) {
-  const p = perfOf(car, cfg), r = perfOf(car, refCfg);
+function perfBars(car, cfg, nowCfg) {
+  const p = perfOf(car, cfg), r = perfOf(car, cleanConfig(car, null));
+  const n = nowCfg ? perfOf(car, nowCfg) : null;     // when trying a part: what you have mounted now
   const fTop = (v) => (v - 150) / 260, fAcc = (v) => (13 - v) / 11, fGrip = (v) => (v - 8) / 14;
-  const dTop = Math.round(p.topKmh - r.topKmh), dAcc = p.acc0100 - r.acc0100, dGrip = (p.grip - r.grip) / 9.81;
   const num = (x, dec) => x.toFixed(dec).replace(".", ",");
+  const sg = (x) => (x > 0 ? "+" : "−");
+  const dTop = Math.round(p.topKmh - r.topKmh), dAcc = p.acc0100 - r.acc0100, dGrip = (p.grip - r.grip) / 9.81;
+  const nTop = n ? Math.round(p.topKmh - n.topKmh) : 0, nAcc = n ? p.acc0100 - n.acc0100 : 0, nGrip = n ? (p.grip - n.grip) / 9.81 : 0;
   const cap = document.createElement("p"); cap.className = "cmp";
-  cap.textContent = `Differenze rispetto alla versione ${refLabel}. La tacca bianca è il valore ${refLabel}.`;
+  cap.innerHTML = '<span><i class="lg base"></i>di serie</span><span><i class="lg gain"></i>guadagno pezzi</span><span><i class="lg loss"></i>perdita pezzi</span>';
+  if (n) { const x = document.createElement("span"); x.className = "trying"; x.textContent = "In prova: in blu la differenza da quello montato."; cap.appendChild(x); }
   return [cap,
-    statBar("Velocità", fTop(p.topKmh), fTop(r.topKmh), Math.round(p.topKmh) + " km/h", dTop ? (dTop > 0 ? "+" : "−") + Math.abs(dTop) + " km/h" : "", dTop > 0, refLabel),
-    statBar("0-100", fAcc(p.acc0100), fAcc(r.acc0100), num(p.acc0100, 1) + " s", Math.abs(dAcc) >= 0.05 ? (dAcc > 0 ? "+" : "−") + num(Math.abs(dAcc), 1) + " s" : "", dAcc < 0, refLabel),
-    statBar("Tenuta", fGrip(p.grip), fGrip(r.grip), num(p.grip / 9.81, 2) + " g", Math.abs(dGrip) >= 0.005 ? (dGrip > 0 ? "+" : "−") + num(Math.abs(dGrip), 2) + " g" : "", dGrip > 0, refLabel)
+    statBar("Velocità", fTop(p.topKmh), fTop(r.topKmh), Math.round(p.topKmh) + " km/h", dTop ? sg(dTop) + Math.abs(dTop) + " km/h" : "", dTop > 0,
+      n && nTop ? `${sg(nTop)}${Math.abs(nTop)} km/h vs ora` : ""),
+    statBar("0-100", fAcc(p.acc0100), fAcc(r.acc0100), num(p.acc0100, 1) + " s", Math.abs(dAcc) >= 0.05 ? sg(dAcc) + num(Math.abs(dAcc), 1) + " s" : "", dAcc < 0,
+      n && Math.abs(nAcc) >= 0.05 ? `${sg(nAcc)}${num(Math.abs(nAcc), 1)} s vs ora` : ""),
+    statBar("Tenuta", fGrip(p.grip), fGrip(r.grip), num(p.grip / 9.81, 2) + " g", Math.abs(dGrip) >= 0.005 ? sg(dGrip) + num(Math.abs(dGrip), 2) + " g" : "", dGrip > 0,
+      n && Math.abs(nGrip) >= 0.005 ? `${sg(nGrip)}${num(Math.abs(nGrip), 2)} g vs ora` : "")
   ];
 }
 let gAction = null;
@@ -233,8 +245,7 @@ function renderGarage(rebuildModel) {
   lock.hidden = !locked;
   lock.textContent = locked ? `Bloccata: ${unlockText(car)}.` : "";
   const st = $("gStats"); st.textContent = "";
-  if (preview) st.append(...perfBars(car, cfg, cfgFor(car), "montata"));
-  else st.append(...perfBars(car, cfg, cleanConfig(car, null), "di serie"));
+  st.append(...perfBars(car, cfg, preview ? cfgFor(car) : null));
   const parts = $("gParts"); parts.textContent = "";
   const canEdit = !locked && owned;
   const optButton = (key, value, label, isSwatch) => {
@@ -833,7 +844,8 @@ function updateHud() {
   flag(el.gT, "low", h.state === "run" && h.time < 5);
   flag(el.gS, "turbo", h.turbo > 0);
   hide(el.turbo, !(h.turbo > 0)); if (h.turbo > 0) put(el.turbo, "Turbo " + h.turbo.toFixed(1));
-  hide(el.shield, !h.shield); hide(el.oil, !h.slip); hide(el.off, !h.off);
+  hide(el.shield, !(h.shield > 0)); hide(el.oil, !h.slip); hide(el.off, !h.off);
+  if (h.shield > 0) put(el.shield, h.shield > 1 ? `Scudo ×${h.shield}` : "Scudo");
 }
 
 // ------------------------------------------------------------------ input

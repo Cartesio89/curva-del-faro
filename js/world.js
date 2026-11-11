@@ -572,6 +572,9 @@ export class World {
     }
     return y;
   }
+  // height of the ground actually drawn at (s, x), and how far below the road it is
+  groundAt(s, x) { return this.groundY(s, x, this.loopL ? null : this.roadGrid(s, s)); }
+  dropAt(s, x) { return this.sample(s, 0, this._dr || (this._dr = {})).y - this.groundAt(s, x); }
   onOtherRoad(grid, wx, wz, s, margin) {
     if (!grid || s === undefined) return false;
     const C = grid.C, cx = Math.floor(wx / C), cz = Math.floor(wz / C);
