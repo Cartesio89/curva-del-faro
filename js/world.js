@@ -84,7 +84,7 @@ function windowsTexture() {
 export function iconTexture(type) {
   const c = document.createElement("canvas"); c.width = 128; c.height = 128;
   const g = c.getContext("2d");
-  const base = { clock: "#f0a224", turbo: "#2a7fc0", shield: "#2f9b6a" }[type];
+  const base = { clock: "#f0a224", turbo: "#2a7fc0", shield: "#2f9b6a", oil: "#c8352e" }[type];
   const x = 64, y = 64;
   g.fillStyle = "rgba(255,255,255,0.4)"; g.beginPath(); g.arc(x, y, 62, 0, Math.PI * 2); g.fill();
   g.fillStyle = base; g.beginPath(); g.arc(x, y, 54, 0, Math.PI * 2); g.fill();
@@ -96,6 +96,12 @@ export function iconTexture(type) {
     g.beginPath(); g.moveTo(x, y); g.lineTo(x, y - 24); g.moveTo(x, y); g.lineTo(x + 17, y + 6); g.stroke();
   } else if (type === "turbo") {
     g.beginPath(); g.moveTo(x + 7, y - 38); g.lineTo(x - 22, y + 5); g.lineTo(x - 1, y + 5); g.lineTo(x - 9, y + 38); g.lineTo(x + 22, y - 7); g.lineTo(x + 1, y - 7); g.closePath(); g.fill();
+  } else if (type === "oil") {
+    // black drop on red: a hazard, not a bonus
+    g.fillStyle = "#14121a";
+    g.beginPath(); g.moveTo(x, y - 38); g.bezierCurveTo(x + 8, y - 20, x + 28, y - 2, x + 28, y + 12);
+    g.arc(x, y + 12, 28, 0, Math.PI); g.bezierCurveTo(x - 28, y - 2, x - 8, y - 20, x, y - 38); g.fill();
+    g.fillStyle = "rgba(255,255,255,0.55)"; g.beginPath(); g.ellipse(x - 10, y + 8, 5, 10, 0.3, 0, Math.PI * 2); g.fill();
   } else {
     g.beginPath(); g.moveTo(x, y - 35); g.lineTo(x + 29, y - 25); g.quadraticCurveTo(x + 27, y + 20, x, y + 37); g.quadraticCurveTo(x - 27, y + 20, x - 29, y - 25); g.closePath(); g.fill();
   }
@@ -201,9 +207,13 @@ function sceneryKit(track) {
     const s = g.createLinearGradient(40, 0, 220, 0);
     s.addColorStop(0, "rgba(120,90,200,0.55)"); s.addColorStop(0.5, "rgba(60,180,170,0.5)"); s.addColorStop(1, "rgba(220,170,60,0.5)");
     g.fillStyle = s; g.beginPath(); g.ellipse(140, 120, 70, 16, 0.2, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(110, 150, 50, 10, -0.3, 0, Math.PI * 2); g.fill();
+    // glossy rim so the patch reads against dark asphalt and at night
+    g.strokeStyle = "rgba(225,230,240,0.75)"; g.lineWidth = 7;
+    g.beginPath(); g.ellipse(128, 128, 114, 86, 0, 0, Math.PI * 2); g.stroke();
   }, false);
   kit.oilGeo = new THREE.PlaneGeometry(3.2, 3.2); kit.oilGeo.rotateX(-Math.PI / 2);
-  kit.oilMat = new THREE.MeshStandardMaterial({ map: oilTex, transparent: true, roughness: 0.05, metalness: 0.4, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+  kit.oilMat = new THREE.MeshStandardMaterial({ map: oilTex, emissive: "#ffffff", emissiveMap: oilTex, emissiveIntensity: 0.18, transparent: true, roughness: 0.05, metalness: 0.4, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
   const coinFace = canvasTex(128, 128, (g, w, h) => {
     g.fillStyle = "#f2b632"; g.fillRect(0, 0, w, h);
     g.strokeStyle = "#c98a12"; g.lineWidth = 10; g.beginPath(); g.arc(64, 64, 52, 0, Math.PI * 2); g.stroke();
@@ -215,7 +225,7 @@ function sceneryKit(track) {
   const faceMat = new THREE.MeshStandardMaterial({ map: coinFace, metalness: 0.6, roughness: 0.3, emissive: 0x2a1a00 });
   kit.coinMat = [edgeMat, faceMat, faceMat];
   kit.icon = {};
-  for (const t of ["clock", "turbo", "shield"]) {
+  for (const t of ["clock", "turbo", "shield", "oil"]) {
     const tex = new THREE.CanvasTexture(iconTexture(t)); tex.colorSpace = THREE.SRGBColorSpace;
     kit.icon[t] = new THREE.SpriteMaterial({ map: tex, depthWrite: false });
   }
@@ -324,18 +334,57 @@ export class World {
     if (Math.abs(this.lastY + r) > amp * 2.2) r = -r;
     return r;
   }
+  // The road never comes back near itself (no overpasses, no hairpin folding onto an earlier stretch):
+  // a piece that would pass within 60 m of road already laid is drawn again, ending with a straight if needed.
   addPiece() {
+    let best = null;
+    for (let t = 0; t < 24; t++) {
+      const n0 = this.k.length, y0 = this.lastY, sg = this.signs.length;
+      this.addPieceRaw(t < 8 ? null : t < 16 ? (t % 2 ? 1 : -1) : 0);
+      const gap = this.clearOfItself(n0);
+      if (gap === Infinity) return;
+      // keep the attempt that stays farthest from the old road, in case none is fully clear
+      if (!best || gap > best.gap) best = { gap, k: this.k.slice(n0), y: this.py.slice(n0 + 1), signs: this.signs.slice(sg) };
+      this.k.length = n0;
+      this.th.length = this.px.length = this.pz.length = this.py.length = n0 + 1;
+      this.lastY = y0; this.signs.length = sg;
+      if (t === 23) { best.k.forEach((k, i) => this.pushSeg(k, best.y[i])); this.signs.push(...best.signs); }
+    }
+  }
+  // smallest distance (m) between the new piece and road laid before it, Infinity if over 60 m
+  clearOfItself(n0) {
+    let gap = Infinity;
+    const C = 60, g = new Map(), n = this.k.length;
+    const key = (i) => Math.floor(this.px[i] / C) + "," + Math.floor(this.pz[i] / C);
+    const add = (i) => { const kk = key(i); let l = g.get(kk); if (!l) g.set(kk, (l = [])); l.push(i); };
+    for (let i = Math.max(0, n0 - 400); i <= n; i++) add(i);
+    for (let i = n0; i <= n; i++) {
+      const cx = Math.floor(this.px[i] / C), cz = Math.floor(this.pz[i] / C);
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+        const l = g.get((cx + a) + "," + (cz + b));
+        if (l) for (const j of l) {
+          if (i - j <= 40) continue;                         // the stretch just behind: always close, that's fine
+          const dx = this.px[i] - this.px[j], dz = this.pz[i] - this.pz[j];
+          const d2 = dx * dx + dz * dz;
+          if (d2 < C * C) gap = Math.min(gap, Math.sqrt(d2));
+        }
+      }
+    }
+    return gap;
+  }
+  // force: null = random piece, 0 = straight, ±1 = a bend that direction
+  addPieceRaw(force) {
     const s0 = this.length;
     const d = this.difficulty(s0);
     const [kmin, kmax] = this.track.curve;
     if (s0 < 200) { this.addRoad(0, 40, 0, 0, 0); return; }
-    const r = Math.random();
+    const r = force === 0 ? 0 : force ? 0.5 : Math.random();
     const segs = (m) => Math.max(1, Math.round(m / SEG_L));
     if (r < 0.3) {
       const len = rnd(150, 450 - d * 150);
       this.addRoad(4, segs(len), 4, 0, this.randomRise(len));
     } else if (r < 0.8) {
-      const dir = Math.random() < 0.5 ? -1 : 1;
+      const dir = force || (Math.random() < 0.5 ? -1 : 1);
       const k = rnd(kmin, kmin + (kmax - kmin) * (0.45 + 0.55 * d)) * dir;
       const en = segs(rnd(60, 140)), ho = segs(rnd(60, 320)), le = segs(rnd(60, 140));
       const tight = Math.abs(k) > (kmin + kmax) / 2;
@@ -464,9 +513,74 @@ export class World {
     return p.y + (far - p.y) * t;
   }
 
+  // A wide floor well below every visible stretch of road: wherever the terrain strips leave a gap
+  // (inside the tightest bends) you see ground in the distance, never the sky through the earth.
+  underlay(s) {
+    if (!this.under) {
+      this.under = new THREE.Mesh(new THREE.CircleGeometry(4000, 40), new THREE.MeshStandardMaterial({ color: this.track.ground, roughness: 1 }));
+      this.under.rotation.x = -Math.PI / 2;
+      this.root.add(this.under);
+    }
+    if (this.underS !== undefined && Math.abs(s - this.underS) < 50) return;
+    this.underS = s;
+    let ymin = Infinity;
+    const i0 = Math.max(0, Math.floor((s - 400) / SEG_L)), i1 = Math.min(this.py.length - 1, Math.floor((s + 1700) / SEG_L));
+    for (let i = i0; i <= i1; i++) ymin = Math.min(ymin, this.py[i]);
+    const p = this.sample(s, 0, {});
+    this.under.position.set(p.x, ymin - 25, p.z);
+  }
+
+  // Spatial index of the road centreline around a chunk: the endless road can come back close to itself
+  // (hairpins, S-bends, crossings at different heights). Used so terrain and scenery never cover another stretch.
+  roadGrid(s0, s1) {
+    const g = new Map(), C = 30, tmp = {};
+    const a = Math.max(0, s0 - 1700), b = Math.min(this.length - SEG_L, s1 + 1700);
+    for (let s = a; s <= b; s += SEG_L) {
+      this.sample(s, 0, tmp);
+      const key = Math.floor(tmp.x / C) + "," + Math.floor(tmp.z / C);
+      let l = g.get(key); if (!l) g.set(key, (l = []));
+      l.push({ s, x: tmp.x, z: tmp.z, y: tmp.y });
+    }
+    g.C = C;
+    return g;
+  }
+  // terrain height that never rises over another stretch of road: flat 0.3 m under it within 12 m, then a gentle bank
+  groundY(s, x, grid) {
+    let y = this.terrainY(s, x);
+    if (!grid || this.loopL || Math.abs(x) <= ROAD_HALF + KERB + 0.01) return y;
+    const t = this.sample(s, x, this._gy || (this._gy = {}));
+    const C = grid.C, cx = Math.floor(t.x / C), cz = Math.floor(t.z / C);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      const l = grid.get((cx + a) + "," + (cz + b));
+      if (!l) continue;
+      for (let n = 0; n < l.length; n++) {
+        const p = l[n];
+        if (Math.abs(p.s - s) <= 30) continue;          // its own stretch of road
+        const d = Math.hypot(p.x - t.x, p.z - t.z);
+        const lim = p.y - 0.3 + Math.max(0, d - 12) * 0.35;
+        if (y > lim) y = lim;
+      }
+    }
+    return y;
+  }
+  onOtherRoad(grid, wx, wz, s, margin) {
+    if (!grid || s === undefined) return false;
+    const C = grid.C, cx = Math.floor(wx / C), cz = Math.floor(wz / C);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      const l = grid.get((cx + a) + "," + (cz + b));
+      if (l) for (const p of l) {
+        if (Math.abs(p.s - s) <= 30) continue;
+        const dx = p.x - wx, dz = p.z - wz;
+        if (dx * dx + dz * dz < margin * margin) return true;
+      }
+    }
+    return false;
+  }
+
   // -------------------------------------------------------------- chunks
   update(s) {
     this.ensure(s);
+    this.underlay(s);
     const first = Math.max(0, Math.floor((s - 60) / (CHUNK * SEG_L)));
     const last = Math.floor((s + this.track.fogFar + 150) / (CHUNK * SEG_L));
     for (const [c, obj] of this.chunks) if (c < first || c > last) { this.disposeChunk(obj); this.chunks.delete(c); }
@@ -487,9 +601,27 @@ export class World {
     const p = this.sample(it.s, it.x);
     let obj;
     if (it.type === "oil") {
+      // lie on the road surface (it climbs and dips): build the orientation from the road itself,
+      // otherwise on a slope half of the patch ends up under the asphalt and the oil is invisible
       obj = new THREE.Mesh(this.kit.oilGeo, this.kit.oilMat);
-      obj.position.set(p.x, p.y + 0.03, p.z);
-      obj.rotation.y = p.heading + rnd(-0.4, 0.4);
+      const f0 = this.sample(it.s - 1.6, it.x, {}), f1 = this.sample(it.s + 1.6, it.x, {});
+      const fwd = new THREE.Vector3(f1.x - f0.x, f1.y - f0.y, f1.z - f0.z).normalize();
+      const right = new THREE.Vector3(-Math.cos(p.heading), 0, Math.sin(p.heading));
+      const up = new THREE.Vector3().crossVectors(fwd, right).normalize();
+      if (up.y < 0) up.negate();
+      const rgt = new THREE.Vector3().crossVectors(up, fwd).normalize();
+      obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(rgt, up, fwd));
+      obj.rotateY(rnd(-0.4, 0.4));
+      obj.position.set(p.x, p.y + 0.06, p.z);
+      obj.renderOrder = 2;
+      // a warning marker above the patch: a flat stain is hard to read from a low chase camera, worse at night
+      const patch = obj;
+      obj = new THREE.Group();
+      obj.add(patch);
+      const mark = new THREE.Sprite(this.kit.icon.oil);
+      mark.scale.set(1.5, 1.5, 1.5);
+      mark.position.set(p.x, p.y + 1.25, p.z);
+      obj.add(mark);
     } else if (it.type === "cones") {
       obj = new THREE.Group();
       for (let i = -1; i <= 1; i++) {
@@ -516,7 +648,7 @@ export class World {
     this.root.add(obj);
   }
 
-  ribbon(s0, s1, offsets, uFn, vScale, yFn, colorFn) {
+  ribbon(s0, s1, offsets, uFn, vScale, yFn, colorFn, xFn) {
     // rows along s, columns across offsets
     const rows = Math.round((s1 - s0) / SEG_L) + 1;
     const cols = offsets.length;
@@ -526,7 +658,7 @@ export class World {
     for (let r = 0; r < rows; r++) {
       const s = s0 + r * ((s1 - s0) / (rows - 1));
       for (let c = 0; c < cols; c++) {
-        const x = offsets[c];
+        const x = xFn ? xFn(s, offsets[c]) : offsets[c];
         this.sample(s, x, tmp);
         const idx = r * cols + c;
         pos[idx * 3] = tmp.x; pos[idx * 3 + 1] = yFn ? yFn(s, x, tmp.y) : tmp.y; pos[idx * 3 + 2] = tmp.z;
@@ -568,11 +700,32 @@ export class World {
       tmpC.copy(a < ROAD_HALF + VERGE * 0.6 ? verge : base).offsetHSL(0, 0, n);
       return tmpC;
     };
-    const yFn = (s, x, y) => (Math.abs(x) <= ROAD_HALF + KERB + 0.01 ? y - 0.02 : this.terrainY(s, x) - 0.03);
+    const grid = this.loopL ? null : this.roadGrid(s0, s1);
+    // inside a bend the ground strip would fold over itself past the centre of the curve: stop it before that
+    const foldCache = new Map();
+    const xFold = (s, x) => {
+      // limit = min over nearby segments of (0.92 R + distance along the road): changes smoothly from row to row
+      const key = s * 2 + (x > 0 ? 1 : 0);
+      let lim = foldCache.get(key);
+      if (lim === undefined) {
+        const i = Math.floor(s / SEG_L);
+        lim = Infinity;
+        for (let j = Math.max(0, i - 60); j <= Math.min(this.k.length - 1, i + 60); j++) {
+          const kj = this.k[j];
+          if (Math.sign(kj) !== Math.sign(x) || Math.abs(kj) < 1e-5) continue;
+          lim = Math.min(lim, 0.92 / Math.abs(kj) + Math.abs(j - i) * SEG_L * 0.6);
+        }
+        foldCache.set(key, lim);
+      }
+      return Math.abs(x) > lim ? Math.sign(x) * Math.max(ROAD_HALF + KERB + 1, lim) : x;
+    };
+    const yFn = (s, x, y) => (Math.abs(x) <= ROAD_HALF + KERB + 0.01 ? y - 0.02 : this.groundY(s, x, grid) - 0.03);
     for (const side of [-1, 1]) {
-      const raw = this.groundRaw || [ROAD_HALF + KERB, ROAD_HALF + 4, ROAD_HALF + 12, ROAD_HALF + VERGE, ROAD_HALF + 70, ROAD_HALF + 160, OUTER];
+      // columns every ~10-25 m so a triangle can never span across another stretch of road
+      const raw = this.groundRaw || [ROAD_HALF + KERB, ROAD_HALF + 4, ROAD_HALF + 12, ROAD_HALF + VERGE,
+        ...Array.from({ length: 13 }, (_, i) => ROAD_HALF + 40 + i * 12), ...Array.from({ length: 7 }, (_, i) => 220 + i * 16.7)];
       const offs = side > 0 ? raw.slice().reverse() : raw.map((v) => -v);
-      const gm = new THREE.Mesh(this.ribbon(s0, s1, offs, () => 0, 10, yFn, colorFn), this.groundMat);
+      const gm = new THREE.Mesh(this.ribbon(s0, s1, offs, () => 0, 10, yFn, colorFn, this.loopL ? null : xFold), this.groundMat);
       gm.receiveShadow = true; grp.add(gm); owned.push(gm.geometry);
     }
 
@@ -589,10 +742,16 @@ export class World {
     const tmp = {};
     const at = (s, x, sc = 1, ry = 0, ySc = sc) => {
       this.sample(s, x, tmp);
-      return M(tmp.x, this.terrainY(s, x) - 0.05, tmp.z, sc, ySc, sc, tmp.heading + ry);
+      const m = M(tmp.x, this.groundY(s, x, grid) - 0.05, tmp.z, sc, ySc, sc, tmp.heading + ry);
+      m.userData = s; return m;
     };
     const lists = {};
-    const push = (k, m) => { if (this.blocked(m.elements[12], m.elements[14], k)) return; (lists[k] || (lists[k] = [])).push(m); };
+    const push = (k, m) => {
+      if (this.blocked(m.elements[12], m.elements[14], k)) return;
+      const margin = k === "building" ? ROAD_HALF + 12 : k === "post" || k === "lamp" || k === "lampHead" ? 0 : ROAD_HALF + 3.5;
+      if (margin && this.onOtherRoad(grid, m.elements[12], m.elements[14], m.userData, margin)) return;
+      (lists[k] || (lists[k] = [])).push(m);
+    };
     const scen = tr.scenery;
     const rand = mulberry(c * 9973 + 17);
     if (scen.includes("post")) for (let s = s0; s < s1; s += 20) { push("post", at(s, ROAD_HALF + 1.2)); push("post", at(s, -ROAD_HALF - 1.2)); }
