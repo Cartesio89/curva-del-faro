@@ -500,7 +500,7 @@ function openCircuits() {
     const rec = profile.circuits && profile.circuits[c.id];
     const prev = CIRCUITS[CIRCUITS.indexOf(c) - 1];
     d.textContent = ok
-      ? `${c.desc} Premio al 1°: ${fmtC(prizeFor(c, 1))}.${rec ? ` Miglior arrivo ${rec.best_pos}°, giro ${fmtLap(Number(rec.best_lap))}.` : ""}`
+      ? `${c.desc} Premio al 1°: ${fmtC(prizeFor(c, 1))}.${rec ? ` Miglior arrivo ${rec.best_pos}°${rec.best_lap ? `, giro ${fmtLap(Number(rec.best_lap))}` : ""}.` : ""}`
       : `Bloccato: arriva tra i primi 3 a ${prev.name}.`;
     txt.append(name, d); b.append(sw, txt);
     b.addEventListener("click", () => startCircuit(c));
