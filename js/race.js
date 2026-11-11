@@ -307,6 +307,18 @@ export class Race {
     this.renderer.render(this.scene, this.camera);
   }
 
+  // what the sound engine needs this frame
+  audioState(input) {
+    const v = this.state === "run" || this.state === "ready" ? this.v : 0;
+    const turnHard = Math.max(0, Math.abs(this.steerSm || 0) - 0.75) * 4 * Math.min(1, this.v / 30);
+    const off = this.state === "run" && Math.abs(this.x) > ROAD_HALF + 0.6 && this.v > 5;
+    return {
+      v, top: this.perf.topMs, gas: !!(input && input.gas), brake: !!(input && input.brake),
+      skid: this.state !== "run" ? 0 : Math.min(1, (this.slip > 0 ? 0.8 : 0) + turnHard + (off ? 0.5 : 0) + (input && input.brake && this.v > 15 ? 0.25 : 0)),
+      offroad: off,
+      others: this.traffic.map((t) => ({ id: t, ds: t.s - this.s, dx: t.x - this.x, v: t.v, top: Math.max(30, t.v * 1.5), carId: null }))
+    };
+  }
   hud() {
     const toCp = Math.max(0, Math.ceil(START_S + CP_FIRST + CP_GAP * this.cpReached - this.s));
     return {

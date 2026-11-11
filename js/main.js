@@ -8,6 +8,7 @@ import { api, ERRORS } from "./api.js";
 import { Race } from "./race.js";
 import { CircuitRace, fmtLap } from "./circuit.js";
 import { Showroom } from "./showroom.js";
+import { Sound, engineKind } from "./audio.js";
 
 const $ = (id) => document.getElementById(id);
 const STEP = 1 / 60;
@@ -70,6 +71,7 @@ const selTrack = () => { const t = trackById(garage.track); return trackUnlocked
 const SCREENS = ["scrLogin", "scrHome", "scrGarage", "scrTracks", "scrCircuits", "scrBoard", "scrPre", "scrPause", "scrOver"];
 function show(id) {
   for (const s of SCREENS) $(s).hidden = s !== id;
+  if (id === "scrOver") sound.stopAll();
   document.body.classList.toggle("racing", !id || id === "scrPause");
 }
 
@@ -655,8 +657,31 @@ function preRace(title, sub) {
   show("scrPre");
   $("preGo").focus({ preventScroll: true });
 }
+const sound = new Sound();
+// engine character of every rival, computed once per car
+function engineVoices(a) {
+  for (const o of a.others) {
+    if (!o.id.sndKind) o.id.sndKind = o.carId ? engineKind(carById(o.carId), o.setup) : { cyl: 4, pitch: 0.9, sub: 0.35, q: 3, bright: 0.6 };
+    o.kind = o.id.sndKind;
+  }
+  return a;
+}
+function renderSnd() {
+  for (const id of ["sndBtn", "sndBtn2"]) { const b = $(id); if (b) b.textContent = sound.on ? "Audio: sì" : "Audio: no"; }
+}
+for (const id of ["sndBtn", "sndBtn2"]) $(id).addEventListener("click", () => {
+  sound.setOn(!sound.on); renderSnd();
+  if (sound.on && race && (mode === "race" || mode === "paused")) sound.startRace(engineKind(race.meta.car, cfgFor(race.meta.car)));
+  if (mode === "paused") sound.pause(true);
+});
+renderSnd();
+let lastHits = 0;
 function goRace() {
   if (!race || mode !== "pre") return;
+  // audio may only start from a tap: this is the tap
+  sound.unlock();
+  sound.startRace(engineKind(race.meta.car, cfgFor(race.meta.car)));
+  lastHits = 0;
   mode = "race";
   show(null);
   $("raceUi").hidden = false;
@@ -667,6 +692,7 @@ function goRace() {
 $("preGo").addEventListener("click", goRace);
 $("preBack").addEventListener("click", () => { const circ = race && race.meta.kind === "circuit"; endRace(); if (circ) openCircuits(); else goHome(); });
 function endRace() {
+  sound.stopAll();
   if (race) { race.dispose(); race = null; }
   $("raceUi").hidden = true;
   clearInput();
@@ -705,11 +731,11 @@ async function finishRun(st) {
 }
 function pause() {
   if (mode !== "race") return;
-  mode = "paused"; clearInput();
+  mode = "paused"; clearInput(); sound.pause(true);
   $("pauseNote").hidden = !(race && race.meta.champ && race.state !== "finished");
   show("scrPause"); $("resume").focus({ preventScroll: true });
 }
-function resume() { if (mode !== "paused") return; show(null); mode = "race"; }
+function resume() { if (mode !== "paused") return; show(null); mode = "race"; sound.pause(false); }
 $("pauseBtn").addEventListener("click", pause);
 $("resume").addEventListener("click", resume);
 $("quit").addEventListener("click", async () => {
@@ -936,6 +962,12 @@ function frame(now) {
     input.tilt = tiltSteer();
     const n = Math.max(1, Math.ceil(dt / STEP - 0.05)), h = dt / n;
     for (let i = 0; i < n; i++) race.update(h, input);
+    if (mode === "race" && race.audioState) {
+      sound.update(engineVoices(race.audioState(input)));
+      const hits = race.contacts ?? race.crashes ?? 0;
+      if (hits > lastHits) sound.bump(6);
+      lastHits = hits;
+    }
     race.render(dt, now);
     updateHud();
   } else if (race && (mode === "paused" || mode === "pre")) {
@@ -963,6 +995,7 @@ async function boot() {
 boot();
 
 // hook for automated checks only
+window.__faroSound = sound;
 window.__faro = {
   get mode() { return mode; }, input,
   get race() { return race; },

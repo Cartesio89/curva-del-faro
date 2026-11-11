@@ -383,6 +383,18 @@ export class CircuitRace {
     return { path: this.mapPath, cars };
   }
 
+  audioState(input) {
+    const p = this.player;
+    const run = this.state === "run" || this.state === "finished";
+    const turnHard = Math.max(0, Math.abs(p.steerSm || 0) - 0.75) * 4 * Math.min(1, p.v / 30);
+    const off = Math.abs(p.x) > ROAD_HALF + 0.6 && p.v > 5;
+    return {
+      v: p.v, top: p.perf.topMs, gas: !!(input && input.gas), brake: !!(input && input.brake),
+      skid: run ? Math.min(1, turnHard + (off ? 0.5 : 0) + (input && input.brake && p.v > 15 ? 0.25 : 0)) : 0,
+      offroad: off,
+      others: this.cars.filter((c) => !c.isPlayer).map((c) => ({ id: c, ds: this.wrapDs(c.s - p.s), dx: c.x - p.x, v: c.v, top: c.perf.topMs, carId: c.carId, setup: c.setup }))
+    };
+  }
   hud() {
     const p = this.player;
     return {
