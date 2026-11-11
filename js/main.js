@@ -9,6 +9,7 @@ import { Race } from "./race.js";
 import { CircuitRace, fmtLap } from "./circuit.js";
 import { Showroom } from "./showroom.js";
 import { Sound, engineKind } from "./audio.js";
+import { initOnline } from "./online.js";
 
 const $ = (id) => document.getElementById(id);
 const STEP = 1 / 60;
@@ -68,7 +69,7 @@ function cfgFor(car) {
 let preview = null; // {car, key, value} — an option shown in the garage before buying it
 const selCar = () => { const c = carById(garage.sel); return carUnlocked(c, profile) && ownsCar(profile, c) ? c : CARS[0]; };
 const selTrack = () => { const t = trackById(garage.track); return trackUnlocked(t, profile) ? t : TRACKS[0]; };
-const SCREENS = ["scrLogin", "scrHome", "scrGarage", "scrTracks", "scrCircuits", "scrBoard", "scrPre", "scrPause", "scrOver"];
+const SCREENS = ["scrLogin", "scrHome", "scrGarage", "scrTracks", "scrCircuits", "scrBoard", "scrRoom", "scrPre", "scrPause", "scrOver"];
 function show(id) {
   for (const s of SCREENS) $(s).hidden = s !== id;
   if (id === "scrOver") sound.stopAll();
@@ -134,6 +135,7 @@ $("loginForm").addEventListener("submit", async (e) => {
     $("lgPin").value = "";
     setProfile(r.profile);
     goHome();
+    online.start();
     return;
   }
   let msg = ERRORS[r.error] || "Qualcosa non ha funzionato. Riprova.";
@@ -171,6 +173,7 @@ $("goCircuits").addEventListener("click", () => openCircuits());
 $("goBoard").addEventListener("click", () => openBoard("endless"));
 $("goLogout").addEventListener("click", async () => {
   if (token) api.logout(token);
+  online.stop();
   token = null; store.del("faro-token"); profile = null;
   setLoginMode("login"); showLogin();
 });
@@ -365,7 +368,11 @@ function renderBoard(ol, rows, highlightName, kind) {
     const sub = document.createElement("small");
     const m = document.createElement("span"); m.className = "m";
     const t = document.createElement("span"); t.className = "t";
-    if (kind === "champ") {
+    if (kind === "challenges") {
+      sub.textContent = `${r.challenges === 1 ? "1 sfida" : r.challenges + " sfide"} · ${r.races === 1 ? "1 gara" : r.races + " gare"}`;
+      m.textContent = `${r.wins} ${r.wins === 1 ? "vittoria" : "vittorie"}`;
+      t.textContent = r.races ? Math.round((r.wins / r.races) * 100) + "%" : "";
+    } else if (kind === "champ") {
       sub.textContent = `${carById(r.car).name} · ${r.wins === 1 ? "1 vittoria" : r.wins + " vittorie"} di tappa`;
       m.textContent = `${r.points} pt`;
       t.textContent = fmtLap(Number(r.total_time));
@@ -388,16 +395,16 @@ function renderBoard(ol, rows, highlightName, kind) {
 }
 // kind: "endless" | "races"; filter: track id / circuit id, or "" for the overall board
 async function openBoard(kind, filter = "") {
-  kind = kind === "races" || kind === "champ" ? kind : "endless";
+  kind = ["races", "champ", "challenges"].includes(kind) ? kind : "endless";
   const tabs = $("boardTabs"); tabs.textContent = "";
-  for (const [k, label] of [["endless", "Pista infinita"], ["races", "Gare"], ["champ", "Campionato"]]) {
+  for (const [k, label] of [["endless", "Pista infinita"], ["races", "Gare"], ["champ", "Campionato"], ["challenges", "Sfide"]]) {
     const b = document.createElement("button");
     b.className = "tab" + (k === kind ? " on" : ""); b.textContent = label; b.setAttribute("role", "tab");
     b.addEventListener("click", () => openBoard(k));
     tabs.appendChild(b);
   }
   const fl = $("boardFilters"); fl.textContent = "";
-  const opts = kind === "champ" ? []
+  const opts = kind === "champ" || kind === "challenges" ? []
     : kind === "races"
     ? [["", "Generale"], ...CIRCUITS.map((c) => [c.id, c.name])]
     : [["", "Tutte le piste"], ...TRACKS.map((t) => [t.id, t.name])];
@@ -407,8 +414,10 @@ async function openBoard(kind, filter = "") {
     b.addEventListener("click", () => openBoard(kind, id));
     fl.appendChild(b);
   }
-  fl.hidden = kind === "champ";
-  $("boardNote").textContent = kind === "champ"
+  fl.hidden = kind === "champ" || kind === "challenges";
+  $("boardNote").textContent = kind === "challenges"
+    ? "Gare online contro altri giocatori veri (le IA riempiono la griglia). Vince chi arriva primo tra i giocatori veri."
+    : kind === "champ"
     ? "I 10 migliori campionati conclusi: prima i punti totali delle 5 tappe, poi il tempo totale sommato."
     : kind === "races"
     ? (filter ? "Le 10 migliori gare su questo circuito: prima il piazzamento, poi il tempo totale."
@@ -418,7 +427,8 @@ async function openBoard(kind, filter = "") {
   const ol = $("boardList");
   ol.innerHTML = '<li class="empty">Carico…</li>';
   let rows, k;
-  if (kind === "champ") { rows = await api.topChamp(); k = "champ"; }
+  if (kind === "challenges") { rows = await api.topChallenges(); k = "challenges"; }
+  else if (kind === "champ") { rows = await api.topChamp(); k = "champ"; }
   else if (kind === "races") { rows = filter ? await api.topCircuit(filter) : await api.topRaces(); k = filter ? "circuit" : "races"; }
   else { rows = await api.topEndless(filter || null); k = "endless"; }
   renderBoard(ol, rows, profile && profile.name, k);
@@ -526,8 +536,28 @@ const circuitHooks = {
   onToast: (text, kind) => toast(text, kind),
   onCountdown: (label) => { const h = $("hint"); h.textContent = label; h.className = "hint count"; h.hidden = false; },
   onStart: () => { setTimeout(() => { if (race && race.meta.kind === "circuit") $("hint").hidden = true; }, 700); },
-  onFinish: (st) => { mode = "over"; clearInput(); finishCircuit(st); }
+  onFinish: (st) => {
+    if (st.mp) { online.onMyFinish(st); return; }   // online: wait for everybody, the car keeps rolling
+    mode = "over"; clearInput(); finishCircuit(st);
+  }
 };
+// online challenge race: same car and setup for every real player, grid from the host
+function startMpRace({ circuit, car, setup, grid, hostAI }) {
+  endRace();
+  race = new CircuitRace(renderer, trackById(circuit.theme), circuit, car, setup, circuitHooks,
+    { mobile, playerName: profile.name, grid, hostAI });
+  race.setAspect(W, H);
+  race.meta = { car, circuit, kind: "circuit", mp: true, setup };
+  setHudLabels(true);
+  sound.unlock();
+  sound.startRace(engineKind(car, setup));
+  lastHits = 0;
+  mode = "race";
+  show(null);
+  $("raceUi").hidden = false;
+  $("hint").hidden = true;
+  clearInput();
+}
 function setHudLabels(circuit) {
   $("lblDist").textContent = circuit ? "Posizione" : "Percorsi";
   $("lblTime").textContent = circuit ? "Giro" : "Tempo";
@@ -664,6 +694,7 @@ function preRace(title, sub) {
   $("raceUi").hidden = true;
   $("preTitle").textContent = title;
   $("preSub").textContent = sub;
+  $("scrPre").insertBefore($("ctrlBlock"), $("scrPre").querySelector(".actions"));
   renderCtrl(); renderFs();
   show("scrPre");
   $("preGo").focus({ preventScroll: true });
@@ -740,16 +771,27 @@ async function finishRun(st) {
   }
   renderBoard($("oBoard"), await api.topEndless(), profile && profile.name, "endless");
 }
+let mpMenu = false;
 function pause() {
   if (mode !== "race") return;
+  if (race && race.meta.mp) {   // an online race cannot be stopped: the menu opens over it
+    mpMenu = true; clearInput();
+    $("pauseNote").hidden = false; $("pauseNote").textContent = "La gara online non si ferma. «Torna al box» chiude la sfida per tutti.";
+    show("scrPause"); return;
+  }
   mode = "paused"; clearInput(); sound.pause(true);
+  $("pauseNote").textContent = "Se esci ora la tappa conta come ritiro: 0 punti e tempo di penalità.";
   $("pauseNote").hidden = !(race && race.meta.champ && race.state !== "finished");
   show("scrPause"); $("resume").focus({ preventScroll: true });
 }
-function resume() { if (mode !== "paused") return; show(null); mode = "race"; sound.pause(false); }
+function resume() {
+  if (mpMenu) { mpMenu = false; show(null); return; }
+  if (mode !== "paused") return; show(null); mode = "race"; sound.pause(false);
+}
 $("pauseBtn").addEventListener("click", pause);
 $("resume").addEventListener("click", resume);
 $("quit").addEventListener("click", async () => {
+  if (mpMenu || (race && race.meta.mp)) { mpMenu = false; await online.exit(); return; }
   const retire = race && race.meta.champ && race.state !== "finished";
   if (retire) { await retireChampStage(); endRace(); openCircuits(); return; }
   goHome();
@@ -759,8 +801,12 @@ $("again").addEventListener("click", () => {
   if (race && race.meta.champ) { if (champ && champ.done) newChamp(); else startChampStage(); return; }
   if (race && race.meta.kind === "circuit") startCircuit(race.meta.circuit); else startRace();
 });
-$("toBox").addEventListener("click", () => { if (!token) { showLogin(ERRORS.no_session); return; } goHome(); });
-document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
+$("toBox").addEventListener("click", () => {
+  if (!token) { showLogin(ERRORS.no_session); return; }
+  if (online.inChallenge()) { online.exit(); return; }   // "Esci dalla sfida": ends it for everybody
+  goHome();
+});
+document.addEventListener("visibilitychange", () => { if (document.hidden && !(race && race.meta.mp)) pause(); });
 
 // ------------------------------------------------------------------ HUD
 const el = { coins: $("cCoins"), spd: $("spd"), dst: $("dst"), tim: $("tim"), gT: $("gtime"), gS: $("gspd"), cp: $("cpLeft"), turbo: $("cTurbo"), shield: $("cShield"), oil: $("cOil"), off: $("cOff") };
@@ -963,6 +1009,20 @@ if (!fsCan && mobile) {
   if (!n.textContent) { n.textContent = "Per giocare a tutto schermo: Condividi → Aggiungi alla schermata Home, poi apri il gioco da lì."; n.hidden = false; }
 }
 
+// ------------------------------------------------------------------ online challenges
+const NO_INPUT = { gas: false, brake: false, left: false, right: false, tilt: null };
+for (const c of CIRCUITS) { const o = document.createElement("option"); o.value = c.id; o.textContent = `${c.name} · ${c.laps} giri`; $("roomCircuit").appendChild(o); }
+const online = initOnline({
+  api, ERRORS, token: () => token, profile: () => profile, setProfile, toast, show, goHome, startMpRace,
+  endRace: () => endRace(), endRaceKeepRoom: () => { endRace(); mode = "menu"; }, race: () => race,
+  isRacing: () => !!race && (mode === "race" || mode === "paused" || mode === "pre"),
+  fmtLap, fmtC, renderCtrl, ctrlBlock: () => $("ctrlBlock"), carById, setupText, renderBoard,
+  showCar: (car, cfg) => showroom.setCar(car, cleanConfig(car, cfg), false)
+});
+$("goChallenge").addEventListener("click", () => online.openLobbyRoom());
+// browsers allow sound only after a tap: any tap unlocks it (guests start races without tapping "Via")
+addEventListener("pointerdown", () => sound.unlock(), { once: true });
+
 // ------------------------------------------------------------------ loop
 let last = performance.now(), acc = 0;
 function frame(now) {
@@ -973,7 +1033,10 @@ function frame(now) {
     // every frame, so 90/120 Hz screens don't alternate between 0 and 2 physics steps (judder)
     input.tilt = tiltSteer();
     const n = Math.max(1, Math.ceil(dt / STEP - 0.05)), h = dt / n;
-    for (let i = 0; i < n; i++) race.update(h, input);
+    const inp = mpMenu ? NO_INPUT : input;
+    for (let i = 0; i < n; i++) race.update(h, inp);
+    if (race.mp) online.tick(race, dt);
+    if (!race) { requestAnimationFrame(frame); return; }   // the online results just closed the race
     if (mode === "race" && race.audioState) {
       sound.update(engineVoices(race.audioState(input)));
       const hits = race.contacts ?? race.crashes ?? 0;
@@ -998,7 +1061,7 @@ async function boot() {
   requestAnimationFrame(frame);
   if (token) {
     const r = await api.profile(token);
-    if (r.profile) { setProfile(r.profile); goHome(); return; }
+    if (r.profile) { setProfile(r.profile); goHome(); online.start(); return; }
     if (r.error === "network") { showLogin(ERRORS.network); return; }
     store.del("faro-token"); token = null;
   }
@@ -1011,6 +1074,7 @@ window.__faroSound = sound;
 window.__faro = {
   get mode() { return mode; }, input,
   get race() { return race; },
-  fakeLogin(p) { token = "test"; setProfile(p); goHome(); },
+  fakeLogin(p) { token = "test"; setProfile(p); goHome(); online.start(); },
+  online: () => online,
   startRace, openGarage, openTracks, startCircuit: (id) => startCircuit(circuitById(id))
 };

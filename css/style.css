@@ -291,3 +291,21 @@ body.tilt-mode .btn-steer { display: none; }
 body.tilt-mode .rear-btn { bottom: 14px; }
 @media (min-width: 761px) { .rear-btn, .rear-btn.nomap { top: auto; bottom: 90px; } }
 @media (max-height: 520px) and (orientation: landscape) { .rear-btn, .rear-btn.nomap { top: auto; left: 10px; bottom: 80px; } }
+
+/* Online */
+.online { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 10px; }
+.online h3 { margin: 0; }
+.people { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.people li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.people li.empty { color: var(--ink-dim); font-size: 13px; border-style: dashed; }
+.people li small { color: var(--ink-dim); }
+button.small { padding: 6px 12px; font-size: 14px; min-height: 0; }
+.field { display: grid; gap: 4px; }
+.field span { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+.field select, #oMp select { font: inherit; padding: 8px 10px; border-radius: 10px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
+.invite-bar { position: fixed; z-index: 50; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+  max-width: calc(100% - 24px); padding: 10px 14px; border-radius: 14px; background: #2b2836; border: 2px solid var(--amber);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.45); color: var(--ink); font-weight: 600; }
+#oMp { display: grid; gap: 6px; }
+#oMp .actions { flex-wrap: wrap; }

@@ -99,7 +99,32 @@
         <button class="ghost" id="goBoard">Classifica</button>
         <button class="ghost" id="goLogout">Esci</button>
       </div>
+      <div class="online" id="onlineBox">
+        <h3>Online ora · <span id="onlineCount">0</span></h3>
+        <ul class="people" id="onlineList"></ul>
+        <button class="ghost wide" id="goChallenge">Apri una sfida</button>
+      </div>
       <p class="note" id="homeNext"></p>
+    </section>
+
+    <!-- ===== Online challenge: waiting room on the circuit ===== -->
+    <section class="card side-card room" id="scrRoom" hidden>
+      <h2 id="roomTitle">Sfida</h2>
+      <p class="note" id="roomSub"></p>
+      <label class="field"><span>Circuito</span><select id="roomCircuit"></select></label>
+      <h3>In griglia</h3>
+      <ul class="people" id="roomPlayers"></ul>
+      <p class="note" id="roomAi"></p>
+      <div id="roomBox"></div>
+      <div id="roomInviteBox">
+        <h3>Invita chi è online</h3>
+        <ul class="people" id="roomOnline"></ul>
+      </div>
+      <p class="note" id="roomWait" hidden></p>
+      <div class="actions">
+        <button class="go big-go" id="roomGo">Parti!</button>
+        <button class="ghost" id="roomExit">Esci dalla sfida</button>
+      </div>
     </section>
 
     <!-- ===== Garage ===== -->
@@ -151,12 +176,14 @@
     <section class="card center-card pre" id="scrPre" hidden>
       <h2 id="preTitle">Pronto?</h2>
       <p class="note" id="preSub"></p>
-      <h3>Come sterzi?</h3>
-      <div class="opts big-opts" id="ctrlOpts" role="radiogroup" aria-label="Comandi di sterzo">
-        <button class="opt" data-ctrl="arrows" role="radio">Frecce<small>tasti ‹ › sullo schermo</small></button>
-        <button class="opt" data-ctrl="tilt" role="radio">Giroscopio<small>inclina il telefono</small></button>
+      <div id="ctrlBlock">
+        <h3>Come sterzi?</h3>
+        <div class="opts big-opts" id="ctrlOpts" role="radiogroup" aria-label="Comandi di sterzo">
+          <button class="opt" data-ctrl="arrows" role="radio">Frecce<small>tasti ‹ › sullo schermo</small></button>
+          <button class="opt" data-ctrl="tilt" role="radio">Giroscopio<small>inclina il telefono</small></button>
+        </div>
+        <p class="note" id="ctrlNote" hidden></p>
       </div>
-      <p class="note" id="ctrlNote" hidden></p>
       <div class="actions">
         <button class="go big-go" id="preGo">Via!</button>
         <button class="ghost" id="fsBtn" hidden>Schermo intero</button>
@@ -186,10 +213,16 @@
       <ol class="order" id="oOrder" hidden></ol>
       <div id="oChamp" hidden><h3 id="oChampTitle">Classifica campionato</h3><ol class="order" id="oChampList"></ol></div>
       <div class="unlocks" id="oUnlocks"></div>
+      <div id="oMp" hidden></div>
       <div class="actions"><button class="go" id="again">Riparti</button><button class="ghost" id="toBox">Box</button></div>
       <div class="board"><h3 id="oBoardTitle">Top 10</h3><ol id="oBoard"></ol></div>
     </section>
   </div>
+</div>
+<div class="invite-bar" id="inviteBar" hidden role="alertdialog" aria-live="assertive">
+  <span id="inviteText"></span>
+  <button class="go small" id="invYes">Accetta</button>
+  <button class="ghost small" id="invNo">Rifiuta</button>
 </div>
 <noscript>Serve JavaScript per giocare.</noscript>
 <script type="module" src="js/main.js"></script>

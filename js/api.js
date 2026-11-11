@@ -1,7 +1,9 @@
 // Thin client for the Supabase RPC functions. The publishable key is meant to be public:
 // the database only exposes the faro_* functions, never the tables.
-const URL = "https://prmyrmpmfavppkbzdqyg.supabase.co/rest/v1/rpc/";
-const KEY = "sb_publishable_M_ihkB0s9phBxPwDwQFd5g_KDzlQmDW";
+export const SUPABASE_URL = "https://prmyrmpmfavppkbzdqyg.supabase.co";
+export const SUPABASE_KEY = "sb_publishable_M_ihkB0s9phBxPwDwQFd5g_KDzlQmDW";
+const URL = SUPABASE_URL + "/rest/v1/rpc/";
+const KEY = SUPABASE_KEY;
 
 async function rpc(name, args) {
   const ctrl = new AbortController();
@@ -42,7 +44,18 @@ export const api = {
   champStart: (token, car, field) => rpc("faro_champ_start", { p_token: token, p_car: car, p_field: field }),
   champStage: (token, champ, position, time, bestLap, order, retire) =>
     rpc("faro_champ_stage", { p_token: token, p_champ: champ, p_position: position, p_time: time, p_best_lap: bestLap, p_order: order, p_retire: !!retire }),
-  topChamp: () => rpc("faro_top_champ", {})
+  topChamp: () => rpc("faro_top_champ", {}),
+  roomCreate: (token, circuit, car, setup) => rpc("faro_room_create", { p_token: token, p_circuit: circuit, p_car: car, p_setup: setup }),
+  roomInvite: (token, room, name) => rpc("faro_room_invite", { p_token: token, p_room: room, p_name: name }),
+  invitesPending: (token) => rpc("faro_invites_pending", { p_token: token }),
+  roomRespond: (token, room, accept) => rpc("faro_room_respond", { p_token: token, p_room: room, p_accept: accept }),
+  roomGet: (token, room) => rpc("faro_room_get", { p_token: token, p_room: room }),
+  roomNext: (token, room, circuit) => rpc("faro_room_next", { p_token: token, p_room: room, p_circuit: circuit }),
+  roomLeave: (token, room) => rpc("faro_room_leave", { p_token: token, p_room: room }),
+  roomStatus: (token, room, status) => rpc("faro_room_status", { p_token: token, p_room: room, p_status: status }),
+  challengeResult: (token, room, raceNo, position, realRank, humans, time, best) =>
+    rpc("faro_challenge_result", { p_token: token, p_room: room, p_race_no: raceNo, p_position: position, p_real_rank: realRank, p_humans: humans, p_time: time, p_best_lap: best }),
+  topChallenges: () => rpc("faro_top_challenges", {})
 };
 
 export const ERRORS = {
@@ -60,5 +73,9 @@ export const ERRORS = {
   car_not_owned: "Prima devi comprare l'auto.",
   bad_item: "Oggetto non in vendita.",
   locked_circuit: "Circuito non ancora sbloccato.",
-  no_champ: "Campionato non trovato o già concluso."
+  no_champ: "Campionato non trovato o già concluso.",
+  no_room: "La sfida non c'è più.",
+  no_player: "Giocatore non trovato.",
+  room_full: "La sfida è al completo (6).",
+  duplicate: "Risultato già salvato."
 };

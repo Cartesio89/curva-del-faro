@@ -10,6 +10,40 @@ const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 const CAR_LEN = 4.4, CAR_WID = 1.9;
 export const AI_LINE = 1.3;
 
+// The AI field for a circuit: cars and setups in line with the player's car, skill set by the circuit.
+// Used for single races and championships, and by the host of an online challenge (then sent to everybody).
+export function aiSpecs(circuit, car, cfg, aiNames, count = 5) {
+  // AI cars start from the player's car *as it leaves the factory* (so the player's own parts are a real edge),
+  // then get a random setup whose effects are visible both on the car and on the stopwatch.
+  const pStock0 = performance(car, defaultConfig(car)), pAct = performance(car, cfg);
+  // the field also gets 60 % of the player's upgrades: parts stay worth buying (40 % edge) but cannot buy a walkover
+  const share = (k) => pStock0[k] * (1 + 0.6 * (pAct[k] / pStock0[k] - 1));
+  const pStock = { ...pStock0, topMs: share("topMs"), a0: share("a0"), grip: share("grip"), topKmh: share("topKmh") };
+  const ci = Math.max(0, CIRCUITS.indexOf(circuit));
+  const level = [0.97, 0.99, 1.01, 1.03, 1.05][ci];
+  // skill = share of the grip limit the AI dares to use (1 = perfect driver). Calibrated on real laps:
+  // a good human with a tuned car is around 0.65-0.70. Each circuit asks a bit more.
+  const skill0 = [0.58, 0.58, 0.7, 0.64, 0.72][ci];
+  const pool = Array.isArray(aiNames) && aiNames.length >= count ? aiNames.slice() : AI_NAMES.slice();
+  const names = pool.sort(() => Math.random() - 0.5);
+  const out = [];
+  for (let j = 0; j < count; j++) {
+    const rel = level * rnd(0.98, 1.04) * (j === 0 ? 1.01 : 1); // slot 0 is the pace-setter
+    const want = pStock.topKmh * rel;
+    const model = CARS.slice().sort((a, b) => Math.abs(a.top - want) - Math.abs(b.top - want))[0];
+    const mcfg = { ...defaultConfig(model), color: COLORS[(j * 3 + 1) % COLORS.length] };
+    for (const key of PART_ORDER) { const o = PARTS[key].options; mcfg[key] = o[Math.floor(Math.random() * o.length)].id; }
+    const mStock = performance(model, defaultConfig(model)), mSet = performance(model, mcfg);
+    out.push({
+      name: names[j], kind: "ai", carId: model.id, setup: mcfg,
+      perf: { topMs: pStock.topMs * rel * (mSet.topMs / mStock.topMs), a0: pStock.a0 * rel * (mSet.a0 / mStock.a0),
+              grip: pStock.grip * rnd(0.98, 1.02) * (mSet.grip / mStock.grip) },
+      skill: clamp(skill0 + rnd(0, 0.07) + (j === 0 ? 0.02 : 0), 0.5, 0.8), aggr: rnd(0.3, 0.9)
+    });
+  }
+  return out;
+}
+
 // A lap race on a closed circuit against 5 AI drivers.
 export class CircuitRace {
   constructor(renderer, track, circuit, car, cfg, hooks, opts = {}) {
@@ -38,46 +72,36 @@ export class CircuitRace {
     this.line = this.world.racingLine();
     this.laps = circuit.laps;
 
-    // cars: 5 AI on the first slots, the player starts last
-    // AI cars start from the player's car *as it leaves the factory* (so the player's own parts are a real edge),
-    // then get a random setup whose effects are visible both on the car and on the stopwatch.
-    const pStock0 = performance(car, defaultConfig(car)), pAct = performance(car, cfg);
-    // the field also gets 60 % of the player's upgrades: parts stay worth buying (40 % edge) but cannot buy a walkover
-    const share = (k) => pStock0[k] * (1 + 0.6 * (pAct[k] / pStock0[k] - 1));
-    const pStock = { ...pStock0, topMs: share("topMs"), a0: share("a0"), grip: share("grip"), topKmh: share("topKmh") };
-    const level = [0.97, 0.99, 1.01, 1.03, 1.05][Math.max(0, CIRCUITS.indexOf(circuit))];
-    // skill = share of the grip limit the AI dares to use (1 = perfect driver). Calibrated on real laps:
-    // a good human with a tuned car is around 0.65-0.70. Each circuit asks a bit more.
-    const skill0 = [0.58, 0.58, 0.7, 0.64, 0.72][Math.max(0, CIRCUITS.indexOf(circuit))];
-    const names = opts && Array.isArray(opts.aiNames) && opts.aiNames.length === 5 ? opts.aiNames.slice().sort(() => Math.random() - 0.5) : AI_NAMES.slice().sort(() => Math.random() - 0.5);
+    // cars: 5 AI on the first slots, the player starts last.
+    // In an online challenge the grid comes from the host instead: real players and AI, everybody's car fixed.
+    this.mp = opts.grid ? { hostAI: !!opts.hostAI, me: opts.playerName } : null;
+    const grid = opts.grid || aiSpecs(circuit, car, cfg, opts.aiNames, 5).concat([{ name: opts.playerName || "Tu", kind: "me" }]);
     this.cars = [];
-    for (let j = 0; j < 5; j++) {
-      const rel = level * rnd(0.98, 1.04) * (j === 0 ? 1.01 : 1); // slot 0 is the pace-setter
-      const want = pStock.topKmh * rel;
-      const model = CARS.slice().sort((a, b) => Math.abs(a.top - want) - Math.abs(b.top - want))[0];
-      const mcfg = { ...defaultConfig(model), color: COLORS[(j * 3 + 1) % COLORS.length] };
-      for (const key of PART_ORDER) { const o = PARTS[key].options; mcfg[key] = o[Math.floor(Math.random() * o.length)].id; }
-      const mStock = performance(model, defaultConfig(model)), mSet = performance(model, mcfg);
+    grid.forEach((g, j) => {
+      const isMe = g.kind === "me" || (this.mp && g.name === this.mp.me);
+      // real players all drive the challenge car (only the colour differs, to tell them apart)
+      const human = isMe || g.kind === "human";
+      const model = human ? car : CARS.find((c) => c.id === g.carId) || car;
+      const mcfg = human ? (g.color ? { ...cfg, color: g.color } : cfg) : g.setup;
       const obj = buildCar(model, mcfg);
       scene.add(obj);
-      this.cars.push(this.makeCar({
-        name: names[j], isPlayer: false, obj, len: model.shape.L, wid: model.shape.W,
-        perf: { topMs: pStock.topMs * rel * (mSet.topMs / mStock.topMs), a0: pStock.a0 * rel * (mSet.a0 / mStock.a0),
-                grip: pStock.grip * rnd(0.98, 1.02) * (mSet.grip / mStock.grip) },
-        mass: model.mass, setup: mcfg,
-        skill: clamp(skill0 + rnd(0, 0.07) + (j === 0 ? 0.02 : 0), 0.5, 0.8), aggr: rnd(0.3, 0.9), carId: model.id
-      }, j));
-    }
-    const pObj = buildCar(car, cfg);
-    scene.add(pObj);
-    if (track.night) {
-      const head = new THREE.SpotLight(0xfff2d8, 60, 90, 0.5, 0.6, 1.4);
-      head.position.set(0, 0.8, car.shape.L / 2);
-      const tgt = new THREE.Object3D(); tgt.position.set(0, 0, 30);
-      pObj.add(head, tgt); head.target = tgt;
-    }
-    this.player = this.makeCar({ name: opts.playerName || "Tu", isPlayer: true, obj: pObj, len: car.shape.L, wid: car.shape.W, perf: performance(car, cfg), mass: car.mass, setup: cfg, skill: 0.95, carId: car.id }, 5);
-    this.cars.push(this.player);
+      if (isMe && track.night) {
+        const head = new THREE.SpotLight(0xfff2d8, 60, 90, 0.5, 0.6, 1.4);
+        head.position.set(0, 0.8, model.shape.L / 2);
+        const tgt = new THREE.Object3D(); tgt.position.set(0, 0, 30);
+        obj.add(head, tgt); head.target = tgt;
+      }
+      const c = this.makeCar({
+        name: g.name, isPlayer: isMe, obj, len: model.shape.L, wid: model.shape.W,
+        perf: isMe || g.kind === "human" ? performance(model, mcfg) : g.perf,
+        mass: model.mass, setup: mcfg, skill: isMe ? 0.95 : g.skill || 0.6, aggr: g.aggr || 0.5, carId: model.id,
+        human: isMe || g.kind === "human", slot: j,
+        // a car moved by the network: another player, or the AI when the host simulates it
+        remote: !isMe && !!this.mp && (g.kind === "human" || !this.mp.hostAI)
+      }, j);
+      this.cars.push(c);
+      if (isMe) this.player = c;
+    });
 
     this.t = 0;
     this.state = "countdown";
@@ -243,7 +267,7 @@ export class CircuitRace {
     }
     this.t += dt;
     for (const c of this.cars) {
-      const ds = c.isPlayer && this.state === "run" ? this.drivePlayer(c, dt, input) : this.driveAI(c, dt);
+      const ds = c.remote ? this.followNet(c, dt) : c.isPlayer && this.state === "run" ? this.drivePlayer(c, dt, input) : this.driveAI(c, dt);
       c.yaw = -c.phi;
       c.s += ds;
       const lap = Math.floor(c.s / this.L);
@@ -255,7 +279,7 @@ export class CircuitRace {
         }
         c.lap = lap;
         c.lapStart = this.t;
-        if (lap >= this.laps && !c.finished) {
+        if (lap >= this.laps && !c.finished && !c.remote) {
           c.finished = true; c.finishTime = this.t; this.finishedOrder.push(c);
           if (c.isPlayer) this.finishPlayer();
         }
@@ -278,8 +302,13 @@ export class CircuitRace {
       const ds = this.wrapDs(b.s - a.s);
       const reachS = (a.len + b.len) / 2 - 0.2, reachX = (a.wid + b.wid) / 2 - 0.1;
       if (Math.abs(ds) < reachS && Math.abs(b.x - a.x) < reachX) {
-        // same momentum-based solver for everyone (s is unwrapped progress, so use the wrapped gap)
+        // same momentum-based solver for everyone (s is unwrapped progress, so use the wrapped gap).
+        // A car moved by the network is moved only by its owner: here it pushes but is not pushed.
+        if (a.remote && b.remote) continue;
+        const keep = a.remote ? a : b.remote ? b : null;
+        const saved = keep && { s: keep.s, x: keep.x, v: keep.v, phi: keep.phi, latV: keep.latV };
         const rel = resolveContact(a, b, ds, reachS, reachX, dt);
+        if (keep) Object.assign(keep, saved);
         if ((a.isPlayer || b.isPlayer) && this.state === "run" && !this.contactCool && rel > 1) {
           this.contacts++; this.shake = 0.35; this.contactCool = 0.8;
           this.hooks.onToast("Contatto!", "bad");
@@ -303,6 +332,10 @@ export class CircuitRace {
 
   finishPlayer() {
     this.state = "finished";
+    if (this.mp) {   // online: the final order comes from the host once everybody is home
+      this.hooks.onFinish({ mp: true, time: this.player.finishTime, best: this.player.best, contacts: this.contacts });
+      return;
+    }
     const pos = this.finishedOrder.indexOf(this.player) + 1;
     const p = this.player;
     const times = this.projectFinishTimes();
@@ -328,6 +361,38 @@ export class CircuitRace {
     this.cars.forEach((c, i) => Object.assign(c, snap[i]));
     Object.assign(this, { t: saved.t, finishedOrder: saved.order, hooks: saved.hooks, contacts: saved.contacts, shake: saved.shake });
     return times;
+  }
+
+  // ------------------------------------------------------------------ online
+  // compact state of the cars this client is responsible for: [slot, s, x, v, phi, finishTime|-1, best|-1]
+  netState(all) {
+    const r2 = (n) => Math.round(n * 100) / 100;
+    return this.cars.filter((c) => !c.remote && (all || c.isPlayer))
+      .map((c) => [c.slot, r2(c.s), r2(c.x), r2(c.v), Math.round(c.phi * 1000) / 1000, c.finished ? r2(c.finishTime) : -1, c.best == null ? -1 : r2(c.best)]);
+  }
+  applyNet(rows, now) {
+    for (const r of rows) {
+      const c = this.cars[r[0]];
+      if (!c || !c.remote) continue;
+      c.net = { s: r[1], x: r[2], v: r[3], phi: r[4], at: now };
+      c.seen = now;
+      if (r[6] >= 0) c.best = r[6];
+      if (r[5] >= 0 && !c.finished) { c.finished = true; c.finishTime = r[5]; this.finishedOrder.push(c); }
+    }
+  }
+  // dead reckoning from the last update, then glide towards it (no jumps on the screen)
+  followNet(c, dt) {
+    const n = c.net;
+    if (!n) return 0;
+    const age = Math.min(0.5, (globalThis.performance.now() - n.at) / 1000);   // (performance = car stats here)
+    const ts = n.s + n.v * age;
+    const before = c.s;
+    const k = Math.min(1, dt * 8);
+    if (Math.abs(ts - c.s) > 40) c.s = ts; else c.s += (ts - c.s) * k + n.v * dt * (1 - k);
+    c.x += (n.x - c.x) * k;
+    c.v = n.v; c.phi += (n.phi - c.phi) * k;
+    const ds = c.s - before; c.s = before;   // update() adds ds itself
+    return ds;
   }
 
   // ------------------------------------------------------------------ render
