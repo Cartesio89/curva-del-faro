@@ -104,7 +104,8 @@ export class CircuitRace {
     });
 
     this.t = 0;
-    this.state = "countdown";
+    // online: stand on the grid until every player is looking at the track, then the countdown (go())
+    this.state = this.mp ? "waiting" : "countdown";
     this.countdown = 3.6;
     this.lastCount = null;
     this.contacts = 0;
@@ -255,8 +256,10 @@ export class CircuitRace {
     return st.ds;
   }
 
+  go() { if (this.state === "waiting") { this.state = "countdown"; this.countdown = 3.6; this.lastCount = null; } }
   update(dt, input) {
     this.lastBrake = !!(input && (input.brake || !input.gas));
+    if (this.state === "waiting") return;
     if (this.state === "countdown") {
       this.countdown -= dt;
       const n = Math.ceil(this.countdown - 0.6);

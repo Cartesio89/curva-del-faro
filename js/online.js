@@ -125,6 +125,8 @@ export function initOnline(ctx) {
     roomCh.on("roster", refreshRoom);
     roomCh.on("circuit", (m) => { room.circuit = m.circuit; Object.assign(room, m.car ? { car: m.car, setup: m.setup } : {}); renderRoom(); });
     roomCh.on("start", (m) => beginRace(m));
+    roomCh.on("loaded", (m) => onLoaded(m));
+    roomCh.on("go", () => { const r = ctx.race(); if (r && r.mp) r.go(); });
     roomCh.on("st", (m) => onState(m));
     roomCh.on("result", (m) => onResult(m));
     roomCh.on("next", (m) => onNext(m));
@@ -173,7 +175,10 @@ export function initOnline(ctx) {
     }
     $("roomAi").textContent = `Posti IA: ${6 - humans.length} · in griglia ${humans.length} ${humans.length === 1 ? "giocatore" : "giocatori"}.`;
     $("roomGo").hidden = !host;
-    $("roomGo").disabled = humans.length < 1;
+    // "Parti" only when every invited player has answered and everyone who accepted is connected here
+    const waiting = (room.members || []).filter((m) => m.state === "invited" || (m.state === "joined" && !here.has(m.name) && m.name !== me()));
+    $("roomGo").disabled = waiting.length > 0;
+    $("roomGo").textContent = waiting.length ? `Aspetto ${waiting.map((m) => m.name).join(", ")}…` : "Parti!";
     $("roomInviteBox").hidden = !host;
     $("roomWait").hidden = host;
     $("roomWait").textContent = `Aspetta che ${room.host} faccia partire la gara.`;
@@ -206,16 +211,55 @@ export function initOnline(ctx) {
     roomCh.send("start", msg);
     beginRace(msg);
   }
+  // Everybody builds the race, shows the track, then says "loaded". The host starts the countdown only
+  // when every real player on the grid is looking at the track (or after 25 s for someone who never loads).
+  let loaded = new Set(), gridHumans = [], loadWait = 0, goSent = false, loadTimer = 0;
   function beginRace(m) {
     if (!room) return;
     started = true; result = null; myFinish = null; sendAcc = 0; hostWatch = 0;
     raceNo = m.raceNo; room.circuit = m.circuit; room.car = m.car; room.setup = m.setup;
+    loaded = new Set(); loadWait = 0; goSent = false;
+    gridHumans = m.grid.filter((g) => g.kind === "human").map((g) => g.name);
     hideInvite();
     ctx.startMpRace({ circuit: circuitById(m.circuit), car: ctx.carById(m.car), setup: m.setup, grid: m.grid, hostAI: host });
+    // the first frame of the track has been drawn: tell the others
+    let said = false;
+    const say = () => { if (said) return; said = true; const msg = { n: me(), raceNo }; if (roomCh) roomCh.send("loaded", msg); onLoaded(msg); };
+    requestAnimationFrame(() => requestAnimationFrame(say));
+    setTimeout(say, 1500);   // rAF can be paused when the tab is in the background
+    // a "loaded" message may get lost: repeat it until the start, on a timer (works even if frames are throttled)
+    clearInterval(loadTimer);
+    loadTimer = setInterval(() => {
+      const r = ctx.race();
+      if (!r || !r.mp || r.state !== "waiting" || !roomCh) { clearInterval(loadTimer); return; }
+      if (said) roomCh.send("loaded", { n: me(), raceNo });
+      loadWait += 1.5;
+      if (host) checkAllLoaded();
+    }, 1500);
+  }
+  function onLoaded(m) {
+    if (m.raceNo !== raceNo) return;
+    loaded.add(m.n);
+    if (host) { roomCh && roomCh.send("loaded", { ...m, echo: 1 }); checkAllLoaded(); }
+  }
+  function checkAllLoaded() {
+    const race = ctx.race();
+    if (!host || goSent || !race || !race.mp) return;
+    if (gridHumans.every((n) => loaded.has(n)) || loadWait > 25) {
+      goSent = true;
+      roomCh && roomCh.send("go", { raceNo });
+      race.go();
+    }
   }
   // called by the main loop every frame while an online race runs
   function tick(race, dt) {
     if (!roomCh || !race || !race.mp) return;
+    if (race.state === "waiting") {
+      const missing = gridHumans.filter((n) => !loaded.has(n));
+      const h = $("hint"); h.className = "hint"; h.hidden = false;
+      h.textContent = missing.length ? `Aspetto che ${missing.join(", ")} ${missing.length > 1 ? "vedano" : "veda"} la pista…` : "Si parte!";
+      return;
+    }
     sendAcc += dt;
     if (sendAcc >= SEND_EVERY) { sendAcc = 0; roomCh.send("st", { n: me(), rows: race.netState(host) }); }
     const now = performance.now();
@@ -233,6 +277,8 @@ export function initOnline(ctx) {
   }
   function onState(m) {
     const race = ctx.race();
+    // the host only sends race states after the start: if the "go" got lost, this is the start
+    if (race && race.mp && race.state === "waiting" && room && m.n === room.host && !host) race.go();
     if (race && race.mp) race.applyNet(m.rows || [], performance.now());
   }
   function sendResult(race) {
@@ -348,6 +394,7 @@ export function initOnline(ctx) {
 
   return {
     start, stop, tick, onMyFinish, exit,
+    debug: () => ({ loaded: [...loaded], gridHumans, raceNo, host, goSent, loadWait }),
     inChallenge: () => !!room,
     openLobbyRoom: async () => {          // "Sfida un amico" from home without picking anyone yet
       if (room) { showRoom(); return; }
