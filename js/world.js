@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { ROAD_HALF, LANE_W, CP_FIRST, CP_GAP, START_S } from "./data.js";
 
 export const SEG_L = 5;            // metres per centreline step
-const CHUNK = 40;                   // segments per mesh chunk (200 m)
+const CHUNK = 20;                   // segments per mesh chunk (100 m: smaller slices, smoother frames)
 const KERB = 0.7, VERGE = 26, OUTER = 320;
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -338,37 +338,44 @@ export class World {
   // a piece that would pass within 60 m of road already laid is drawn again, ending with a straight if needed.
   addPiece() {
     let best = null;
+    const old = this.oldGrid(this.k.length);
     for (let t = 0; t < 24; t++) {
       const n0 = this.k.length, y0 = this.lastY, sg = this.signs.length;
       this.addPieceRaw(t < 8 ? null : t < 16 ? (t % 2 ? 1 : -1) : 0);
-      const gap = this.clearOfItself(n0);
+      const gap = this.clearOfItself(n0, old);
       if (gap === Infinity) return;
       // keep the attempt that stays farthest from the old road, in case none is fully clear
       if (!best || gap > best.gap) best = { gap, k: this.k.slice(n0), y: this.py.slice(n0 + 1), signs: this.signs.slice(sg) };
       this.k.length = n0;
       this.th.length = this.px.length = this.pz.length = this.py.length = n0 + 1;
       this.lastY = y0; this.signs.length = sg;
-      if (t === 23) { best.k.forEach((k, i) => this.pushSeg(k, best.y[i])); this.signs.push(...best.signs); }
+      if (t === 23) { best.k.forEach((k, i) => this.pushSeg(k, best.y[i])); this.signs.push(...best.signs); if (best.y.length) this.lastY = best.y[best.y.length - 1]; }
     }
   }
   // smallest distance (m) between the new piece and road laid before it, Infinity if over 60 m
-  clearOfItself(n0) {
+  oldGrid(n0) {
+    const g = new Map(), C = 60;
+    for (let i = Math.max(0, n0 - 400); i <= n0; i++) {
+      const kk = Math.floor(this.px[i] / C) + "," + Math.floor(this.pz[i] / C);
+      let l = g.get(kk); if (!l) g.set(kk, (l = [])); l.push(i);
+    }
+    return g;
+  }
+  clearOfItself(n0, old) {
     let gap = Infinity;
-    const C = 60, g = new Map(), n = this.k.length;
-    const key = (i) => Math.floor(this.px[i] / C) + "," + Math.floor(this.pz[i] / C);
-    const add = (i) => { const kk = key(i); let l = g.get(kk); if (!l) g.set(kk, (l = [])); l.push(i); };
-    for (let i = Math.max(0, n0 - 400); i <= n; i++) add(i);
-    for (let i = n0; i <= n; i++) {
+    const C = 60, n = this.k.length;
+    const near = (i, j) => {
+      const dx = this.px[i] - this.px[j], dz = this.pz[i] - this.pz[j], d2 = dx * dx + dz * dz;
+      if (d2 < C * C) gap = Math.min(gap, Math.sqrt(d2));
+    };
+    for (let i = n0 + 1; i <= n; i++) {
       const cx = Math.floor(this.px[i] / C), cz = Math.floor(this.pz[i] / C);
       for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
-        const l = g.get((cx + a) + "," + (cz + b));
-        if (l) for (const j of l) {
-          if (i - j <= 40) continue;                         // the stretch just behind: always close, that's fine
-          const dx = this.px[i] - this.px[j], dz = this.pz[i] - this.pz[j];
-          const d2 = dx * dx + dz * dz;
-          if (d2 < C * C) gap = Math.min(gap, Math.sqrt(d2));
-        }
+        const l = old.get((cx + a) + "," + (cz + b));
+        if (l) for (const j of l) if (i - j > 40) near(i, j);
       }
+      // the new piece against itself (long bends can curl back)
+      for (let j = n0 + 1; j < i - 40; j += 2) near(i, j);
     }
     return gap;
   }
@@ -533,16 +540,18 @@ export class World {
   // Spatial index of the road centreline around a chunk: the endless road can come back close to itself
   // (hairpins, S-bends, crossings at different heights). Used so terrain and scenery never cover another stretch.
   roadGrid(s0, s1) {
-    const g = new Map(), C = 30, tmp = {};
-    const a = Math.max(0, s0 - 1700), b = Math.min(this.length - SEG_L, s1 + 1700);
-    for (let s = a; s <= b; s += SEG_L) {
-      this.sample(s, 0, tmp);
-      const key = Math.floor(tmp.x / C) + "," + Math.floor(tmp.z / C);
-      let l = g.get(key); if (!l) g.set(key, (l = []));
-      l.push({ s, x: tmp.x, z: tmp.z, y: tmp.y });
+    // one index for the whole road, extended as the road grows (points never change once laid)
+    const C = 30;
+    if (!this.rg) { this.rg = new Map(); this.rgN = 0; }
+    const n = this.k.length;
+    for (let i = this.rgN; i <= n; i++) {
+      const key = Math.floor(this.px[i] / C) + "," + Math.floor(this.pz[i] / C);
+      let l = this.rg.get(key); if (!l) this.rg.set(key, (l = []));
+      l.push({ s: i * SEG_L, x: this.px[i], z: this.pz[i], y: this.py[i] });
     }
-    g.C = C;
-    return g;
+    this.rgN = n + 1;
+    const rg = this.rg;
+    return { C, lo: s0 - 1700, hi: s1 + 1700, get: (k) => rg.get(k) };
   }
   // terrain height that never rises over another stretch of road: flat 0.3 m under it within 12 m, then a gentle bank
   groundY(s, x, grid) {
@@ -555,7 +564,7 @@ export class World {
       if (!l) continue;
       for (let n = 0; n < l.length; n++) {
         const p = l[n];
-        if (Math.abs(p.s - s) <= 30) continue;          // its own stretch of road
+        if (Math.abs(p.s - s) <= 30 || p.s < grid.lo || p.s > grid.hi) continue;   // its own stretch, or road out of sight
         const d = Math.hypot(p.x - t.x, p.z - t.z);
         const lim = p.y - 0.3 + Math.max(0, d - 12) * 0.35;
         if (y > lim) y = lim;
@@ -569,7 +578,7 @@ export class World {
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
       const l = grid.get((cx + a) + "," + (cz + b));
       if (l) for (const p of l) {
-        if (Math.abs(p.s - s) <= 30) continue;
+        if (Math.abs(p.s - s) <= 30 || p.s < grid.lo || p.s > grid.hi) continue;
         const dx = p.x - wx, dz = p.z - wz;
         if (dx * dx + dz * dz < margin * margin) return true;
       }
@@ -583,8 +592,17 @@ export class World {
     this.underlay(s);
     const first = Math.max(0, Math.floor((s - 60) / (CHUNK * SEG_L)));
     const last = Math.floor((s + this.track.fogFar + 150) / (CHUNK * SEG_L));
-    for (const [c, obj] of this.chunks) if (c < first || c > last) { this.disposeChunk(obj); this.chunks.delete(c); }
-    for (let c = first; c <= last; c++) if (!this.chunks.has(c)) this.chunks.set(c, this.buildChunk(c));
+    for (const [c, obj] of this.chunks) if (c < first || c > last + 2) { this.disposeChunk(obj); this.chunks.delete(c); }
+    for (let c = first; c <= last; c++) if (!this.chunks.has(c)) {
+      // needed now: finish it in one go (only happens at the start or if the car outruns the prebuilding)
+      if (this.pending && this.pending.c === c) { let r; while (!(r = this.pending.gen.next()).done); this.chunks.set(c, r.value); this.pending = null; }
+      else this.chunks.set(c, this.buildChunk(c));
+    }
+    if (!this.pending) for (let c = last + 1; c <= last + 2; c++) if (!this.chunks.has(c)) { this.pending = { c, gen: this.buildChunkGen(c) }; break; }
+    if (this.pending) {
+      const r = this.pending.gen.next();
+      if (r.done) { this.chunks.set(this.pending.c, r.value); this.pending = null; }
+    }
     for (const it of this.items) {
       if (it.obj && (it.s < s - 30 || it.taken)) { this.root.remove(it.obj); it.obj = null; }
       if (!it.obj && !it.taken && it.s > s - 30 && it.s < s + this.track.fogFar) this.spawnItem(it);
@@ -681,6 +699,14 @@ export class World {
   }
 
   buildChunk(c) {
+    const g = this.buildChunkGen(c);
+    let r;
+    while (!(r = g.next()).done);
+    return r.value;
+  }
+  // The chunk is built in a few slices (road, each side of ground, scenery): ahead of the visible range
+  // one slice per frame, so the game never stalls for a whole chunk at once.
+  *buildChunkGen(c) {
     const s0 = c * CHUNK * SEG_L, s1 = Math.min(s0 + CHUNK * SEG_L, this.loopL || Infinity);
     const grp = new THREE.Group();
     const owned = [];
@@ -693,6 +719,7 @@ export class World {
       const kerb = new THREE.Mesh(this.ribbon(s0, s1, offs, (ci) => ci, 4, (s, x, y) => y + 0.015), this.kerbMat);
       kerb.receiveShadow = true; grp.add(kerb); owned.push(kerb.geometry);
     }
+    yield;
     const base = new THREE.Color(tr.ground), verge = new THREE.Color(tr.verge), tmpC = new THREE.Color();
     const colorFn = (s, x) => {
       const a = Math.abs(x);
@@ -727,6 +754,7 @@ export class World {
       const offs = side > 0 ? raw.slice().reverse() : raw.map((v) => -v);
       const gm = new THREE.Mesh(this.ribbon(s0, s1, offs, () => 0, 10, yFn, colorFn, this.loopL ? null : xFold), this.groundMat);
       gm.receiveShadow = true; grp.add(gm); owned.push(gm.geometry);
+      yield;
     }
 
     // scenery (instanced)
@@ -786,6 +814,7 @@ export class World {
     add(k.lamp, k.vc, lists.lamp || []);
     add(k.lampHeadGeo, k.lampHeadMat, lists.lampHead || []);
     add(k.building, k.buildingMat, lists.building || []);
+    yield;
 
     // signs
     for (const sg of this.signs) {

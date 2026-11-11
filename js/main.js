@@ -67,7 +67,7 @@ function cfgFor(car) {
 let preview = null; // {car, key, value} — an option shown in the garage before buying it
 const selCar = () => { const c = carById(garage.sel); return carUnlocked(c, profile) && ownsCar(profile, c) ? c : CARS[0]; };
 const selTrack = () => { const t = trackById(garage.track); return trackUnlocked(t, profile) ? t : TRACKS[0]; };
-const SCREENS = ["scrLogin", "scrHome", "scrGarage", "scrTracks", "scrCircuits", "scrBoard", "scrPause", "scrOver"];
+const SCREENS = ["scrLogin", "scrHome", "scrGarage", "scrTracks", "scrCircuits", "scrBoard", "scrPre", "scrPause", "scrOver"];
 function show(id) {
   for (const s of SCREENS) $(s).hidden = s !== id;
   document.body.classList.toggle("racing", !id || id === "scrPause");
@@ -529,10 +529,8 @@ function startCircuit(c, ch) {
   race.setAspect(W, H);
   race.meta = { car, circuit: c, kind: "circuit", champ: ch ? ch.champ : null };
   setHudLabels(true);
-  mode = "race";
-  show(null);
-  $("raceUi").hidden = false;
-  clearInput();
+  preRace(ch ? `Campionato · tappa ${ch.champ.stage + 1} di 5` : c.name,
+    `${c.name}, ${c.laps} giri, contro 5 piloti. Con ${car.name}.`);
 }
 async function finishCircuit(st) {
   const { car, circuit } = race.meta;
@@ -644,12 +642,30 @@ function startRace() {
   race.setAspect(W, H);
   race.meta = { car, track, kind: "endless" };
   setHudLabels(false);
+  preRace(`Pista infinita · ${track.name}`, `Con ${car.name}. Tieni premuto gas per partire.`);
+}
+// before every race: pick how to steer (and full screen), then go
+function preRace(title, sub) {
+  mode = "pre";
+  clearInput();
+  $("raceUi").hidden = true;
+  $("preTitle").textContent = title;
+  $("preSub").textContent = sub;
+  renderCtrl(); renderFs();
+  show("scrPre");
+  $("preGo").focus({ preventScroll: true });
+}
+function goRace() {
+  if (!race || mode !== "pre") return;
   mode = "race";
   show(null);
   $("raceUi").hidden = false;
-  $("hint").hidden = false;
+  $("hint").hidden = race.meta.kind !== "endless";
+  if (race.meta.kind === "circuit" && race.begin) race.begin();
   clearInput();
 }
+$("preGo").addEventListener("click", goRace);
+$("preBack").addEventListener("click", () => { const circ = race && race.meta.kind === "circuit"; endRace(); if (circ) openCircuits(); else goHome(); });
 function endRace() {
   if (race) { race.dispose(); race = null; }
   $("raceUi").hidden = true;
@@ -712,20 +728,29 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) pause
 // ------------------------------------------------------------------ HUD
 const el = { coins: $("cCoins"), spd: $("spd"), dst: $("dst"), tim: $("tim"), gT: $("gtime"), gS: $("gspd"), cp: $("cpLeft"), turbo: $("cTurbo"), shield: $("cShield"), oil: $("cOil"), off: $("cOff") };
 let toastTimer = 0;
+// restart the toast animation without forcing a synchronous layout (that caused a hitch at every toast)
+let toastAnim = null;
+const TOAST_KF = [
+  { opacity: 0, transform: "translate(-50%, -30%) scale(0.85)", offset: 0 },
+  { opacity: 1, transform: "translate(-50%, -50%) scale(1.04)", offset: 0.12 },
+  { opacity: 1, transform: "translate(-50%, -56%) scale(1)", offset: 0.7 },
+  { opacity: 0, transform: "translate(-50%, -66%) scale(1)", offset: 1 }];
 function toast(text, kind) {
   const t = $("toast");
-  t.textContent = text; t.className = "toast"; void t.offsetWidth; t.className = "toast show " + (kind || "");
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.className = "toast"; }, 1200);
+  t.textContent = text; t.className = "toast " + (kind || "");
+  if (toastAnim) toastAnim.cancel();
+  if (t.animate) toastAnim = t.animate(TOAST_KF, { duration: 1100, easing: "ease-out", fill: "forwards" });
+  else { t.style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.opacity = 0; }, 1100); }
 }
 const SEV_LABEL = ["veloce", "media", "stretta"];
 function updateCorner(h) {
   const chip = $("cornerChip"), c = h.corner;
   const show = c && c.dist > 0 && c.dist <= 170 && h.state !== "over" && h.state !== "finished";
-  chip.hidden = !show;
+  hide(chip, !show);
   if (!show) return;
   const d = c.dist > 125 ? "150 m" : c.dist > 75 ? "100 m" : c.dist > 35 ? "50 m" : "ora";
-  chip.textContent = `${c.dir > 0 ? "→" : "←"} ${c.dir > 0 ? "Destra" : "Sinistra"} ${SEV_LABEL[c.sev]} · ${d}`;
-  chip.className = "chip corner sev" + c.sev;
+  put(chip, `${c.dir > 0 ? "→" : "←"} ${c.dir > 0 ? "Destra" : "Sinistra"} ${SEV_LABEL[c.sev]} · ${d}`);
+  const cls = "chip corner sev" + c.sev; if (chip._cls !== cls) { chip._cls = cls; chip.className = cls; }
 }
 function drawMinimap() {
   const cv = $("minimap");
@@ -758,26 +783,31 @@ function drawMinimap() {
   const me = m.cars.find((c) => c.isPlayer);
   if (me) { const [x, z] = P(me.x, me.z); g.fillStyle = "#ffb23e"; g.strokeStyle = "#fff"; g.lineWidth = 3; g.beginPath(); g.arc(x, z, 10, 0, Math.PI * 2); g.fill(); g.stroke(); }
 }
+// HUD writes only what changed: rewriting the same text every frame makes the browser re-layout the page
+// 60 times a second, which on phones shows up as stutter
+function put(node, v) { v = String(v); if (node._v !== v) { node._v = v; node.textContent = v; } }
+function hide(node, h) { if (node._h !== h) { node._h = h; node.hidden = h; } }
+function flag(node, cls, on) { const k = "_c" + cls; if (node[k] !== on) { node[k] = on; node.classList.toggle(cls, on); } }
 function updateHud() {
   const h = race.hud();
   updateCorner(h);
   drawMinimap();
   if (h.circuit) {
-    el.spd.textContent = h.kmh;
-    el.dst.textContent = `${h.pos}°`; $("emDist").textContent = `/${h.total}`;
-    el.tim.textContent = `${h.lap}`; $("emTime").textContent = `/${h.laps}`;
-    $("lapChip").textContent = `Giro ${fmtLap(h.lapTime)} · Migliore ${fmtLap(h.best)}`;
-    el.gT.classList.remove("low"); el.gS.classList.remove("turbo");
-    el.turbo.hidden = true; el.shield.hidden = true; el.oil.hidden = true; el.off.hidden = !h.off;
+    put(el.spd, h.kmh);
+    put(el.dst, `${h.pos}°`); put($("emDist"), `/${h.total}`);
+    put(el.tim, `${h.lap}`); put($("emTime"), `/${h.laps}`);
+    put($("lapChip"), `Giro ${fmtLap(h.lapTime)} · Migliore ${fmtLap(h.best)}`);
+    flag(el.gT, "low", false); flag(el.gS, "turbo", false);
+    hide(el.turbo, true); hide(el.shield, true); hide(el.oil, true); hide(el.off, !h.off);
     return;
   }
-  $("emDist").textContent = "m"; $("emTime").textContent = "s";
-  el.coins.textContent = fmtC(h.coins);
-  el.spd.textContent = h.kmh; el.dst.textContent = h.dist; el.tim.textContent = h.time.toFixed(1); el.cp.textContent = h.toCp;
-  el.gT.classList.toggle("low", h.state === "run" && h.time < 5);
-  el.gS.classList.toggle("turbo", h.turbo > 0);
-  el.turbo.hidden = !(h.turbo > 0); if (h.turbo > 0) el.turbo.textContent = "Turbo " + h.turbo.toFixed(1);
-  el.shield.hidden = !h.shield; el.oil.hidden = !h.slip; el.off.hidden = !h.off;
+  put($("emDist"), "m"); put($("emTime"), "s");
+  put(el.coins, fmtC(h.coins));
+  put(el.spd, h.kmh); put(el.dst, h.dist); put(el.tim, h.time.toFixed(1)); put(el.cp, h.toCp);
+  flag(el.gT, "low", h.state === "run" && h.time < 5);
+  flag(el.gS, "turbo", h.turbo > 0);
+  hide(el.turbo, !(h.turbo > 0)); if (h.turbo > 0) put(el.turbo, "Turbo " + h.turbo.toFixed(1));
+  hide(el.shield, !h.shield); hide(el.oil, !h.slip); hide(el.off, !h.off);
 }
 
 // ------------------------------------------------------------------ input
@@ -901,12 +931,14 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (race && (mode === "race" || mode === "over")) {
     showroom.active = false;
-    acc += dt;
+    // as many equal sub-steps (each at most 1/60 s) as this frame needs: the car moves the same amount
+    // every frame, so 90/120 Hz screens don't alternate between 0 and 2 physics steps (judder)
     input.tilt = tiltSteer();
-    while (acc >= STEP) { race.update(STEP, input); acc -= STEP; }
+    const n = Math.max(1, Math.ceil(dt / STEP - 0.05)), h = dt / n;
+    for (let i = 0; i < n; i++) race.update(h, input);
     race.render(dt, now);
     updateHud();
-  } else if (race && mode === "paused") {
+  } else if (race && (mode === "paused" || mode === "pre")) {
     acc = 0;
     race.render(0, now);
   } else {

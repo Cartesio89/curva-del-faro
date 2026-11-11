@@ -48,7 +48,7 @@ export class CircuitRace {
     const level = [0.97, 0.99, 1.01, 1.03, 1.05][Math.max(0, CIRCUITS.indexOf(circuit))];
     // skill = share of the grip limit the AI dares to use (1 = perfect driver). Calibrated on real laps:
     // a good human with a tuned car is around 0.65-0.70. Each circuit asks a bit more.
-    const skill0 = [0.56, 0.58, 0.6, 0.62, 0.64][Math.max(0, CIRCUITS.indexOf(circuit))];
+    const skill0 = [0.58, 0.58, 0.7, 0.64, 0.72][Math.max(0, CIRCUITS.indexOf(circuit))];
     const names = opts && Array.isArray(opts.aiNames) && opts.aiNames.length === 5 ? opts.aiNames.slice().sort(() => Math.random() - 0.5) : AI_NAMES.slice().sort(() => Math.random() - 0.5);
     this.cars = [];
     for (let j = 0; j < 5; j++) {
@@ -110,14 +110,14 @@ export class CircuitRace {
     else c.steerSm = smoothSteer(c.steerSm || 0, (input.right ? 1 : 0) - (input.left ? 1 : 0), dt);
     const st = stepCar(c, k, c.steerSm, { gas: input.gas, brake: input.brake, G: p.grip * tr.grip * GRIP_ARCADE,
       top: p.topMs * this.draft(c), a0: p.a0, offroad: tr.offroad }, dt);
-    this.barrier(c);
+    this.barrier(c, dt);
     return st.ds;
   }
 
   // gravel and tyre wall beyond the kerbs: heavy slowdown, the car cannot leave the circuit
-  barrier(c) {
+  barrier(c, dt = 1 / 60) {
     const lim = ROAD_HALF + 5;
-    if (Math.abs(c.x) > ROAD_HALF + 2) c.v *= 0.985;
+    if (Math.abs(c.x) > ROAD_HALF + 2) c.v *= Math.pow(0.985, dt * 60);
     if (Math.abs(c.x) > lim) { c.x = Math.sign(c.x) * lim; c.phi *= -0.3; c.v *= 0.8; if (c.isPlayer && !this.wallCool) { this.shake = 0.4; this.wallCool = 1; this.hooks.onToast("Barriera!", "bad"); } }
   }
 
@@ -165,44 +165,60 @@ export class CircuitRace {
     const idx = (k) => ((Math.floor((sm + k) / Ln.segL) % Ln.n) + Ln.n) % Ln.n;
     let vt = Math.min(top, c.vprof[idx(c.v * 0.15 + 1)] * (mist === "early" ? 0.9 : mist === "wide" ? 1.03 : 1));
     // never drive into the back of the car ahead
+    let capped = false;
     for (const o of this.cars) {
       if (o === c) continue;
       const ds = this.wrapDs(o.s - c.s);
-      if (ds > 0 && ds < 14 && Math.abs(o.x - c.x) < 2.1) vt = Math.min(vt, o.v + Math.max(0, ds - 6) * 0.8);
+      if (ds > 0 && ds < 14 && Math.abs(o.x - c.x) < 1.9) { const cap = o.v + Math.max(0, ds - 6) * 0.8; if (cap < vt) { vt = cap; capped = true; } }
     }
-    const gas = c.v < vt - 0.1;
-    const brake = c.v > vt + 0.8;
+    c.stuckT = capped ? (c.stuckT || 0) + dt : Math.max(0, (c.stuckT || 0) - dt * 2);
 
-    // line to follow: racing line, shifted to pass slower cars or to block the player
+    // line to follow: racing line, shifted to pass a slower car, to let a faster rival by, or to defend from the player
     const i0 = idx(0.5);
     let line = Ln.x[i0];
-    let blocker = null, chaser = null;
+    let blocker = null, chaser = null, passer = null;
     for (const o of this.cars) {
       if (o === c) continue;
       const ds = this.wrapDs(o.s - c.s);
-      if (ds > 0 && ds < 30 && Math.abs(o.x - c.x) < 2.4 && o.v < c.v + 1 && (!blocker || ds < blocker.ds)) blocker = { o, ds };
-      if (o.isPlayer && ds < 0 && ds > -16 && o.v > c.v - 2) chaser = { o, ds };
+      // pass only a car that is really holding us up (slower, or we've been stuck behind it)
+      if (ds > 0 && ds < 30 && Math.abs(o.x - c.x) < 2.4 && (o.v < c.v - 0.5 || c.stuckT > 1) && (!blocker || ds < blocker.ds)) blocker = { o, ds };
+      if (o.isPlayer && ds < -4 && ds > -16 && o.v > c.v - 2) chaser = { o, ds };
+      // an AI rival right behind and trying to pass: give it room
+      if (!o.isPlayer && ds < 0 && ds > -14 && o.mode === "pass") passer = o;
     }
-    let mode = "line";
+    let mode = "line", lift = 1;
+    const straight = Math.abs(w.sample(c.s + 20).k) < 0.006;
     if (blocker) {
       const o = blocker.o;
-      if (!c.passSide || c.passT <= 0) {
-        const roomL = o.x + (ROAD_HALF - 0.8), roomR = (ROAD_HALF - 0.8) - o.x;
-        c.passSide = roomR > roomL ? 1 : -1; c.passT = 2.5;
-      }
-      line = o.x + c.passSide * 3.4; mode = "pass";
-    } else if (chaser && this.state === "run" && c.aggr > 0.4) {
-      if (!(c.blockT > 0)) { c.blockX = clamp(chaser.o.x, -3, 3); c.blockT = rnd(1.4, 2.4); }
+      // go by on the side with room, and keep that side unless it closes up
+      const lim = ROAD_HALF - 0.8, roomL = o.x + lim, roomR = lim - o.x;
+      if (!c.passSide || c.passT <= 0 || (c.passSide > 0 ? roomR : roomL) < 2.6) { c.passSide = roomR > roomL ? 1 : -1; c.passT = 3; }
+      line = o.x + c.passSide * 3.0; mode = "pass";
+      if (Ln.ka[idx(c.v * 0.5)] > 0.012) lift = 0.95;   // off the ideal line in a bend: a little slower
+    } else if (passer) {
+      line = Ln.x[i0] - Math.sign(passer.x - c.x || 1) * 1.6; lift = 0.97; mode = "yield";
+    } else if (chaser && this.state === "run" && c.aggr > 0.4 && (c.blockT > 0 || (straight && !(c.blockCd > 0)))) {
+      // defend once, briefly, on a straight; then leave the player alone for a while
+      if (!(c.blockT > 0)) { c.blockX = clamp(chaser.o.x, -3, 3); c.blockT = rnd(0.8, 1.4); c.blockCd = rnd(7, 10); }
       line = c.blockX; mode = "block";
     }
+    c.blockCd = (c.blockCd || 0) - dt;
+    if (lift < 1) vt *= lift;
+    // off the grid: keep your own lane for the first stretch, blend into the ideal line (no first-corner pile-up)
+    if (c.s0 === undefined) { c.s0 = c.s; c.x0 = c.x; }
+    const fromGrid = c.s - c.s0;
+    if (fromGrid < 300 && mode !== "pass") { const a = Math.max(0, fromGrid) / 300; line = c.x0 + (line - c.x0) * a * a; }
     if (mist === "wide") line += -Math.sign(w.sample(c.s + 5).k || 1) * 2.5;
     c.passT = (c.passT || 0) - dt;
     c.blockT = (c.blockT || 0) - dt;
+    const gas = c.v < vt - 0.1;
+    const brake = c.v > vt + 0.8;
     c.mode = mode;
     line = clamp(line, -(ROAD_HALF - 0.8), ROAD_HALF - 0.8);
     // steering like a driver: turn as much as the line bends (feed-forward) and correct heading and position errors
     const kHere = w.sample(c.s + 0.5).k;
-    const onLine = mode === "line" && !mist;
+    // follow the shape of the ideal line also while passing or making room: only the lateral target moves
+    const onLine = mode !== "block" && !mist;
     const kff = onLine ? Ln.k[i0] : kHere;
     const phiT = onLine ? Ln.phi[i0] : 0;
     const phiCmd = phiT + clamp((line - c.x) * 0.15, -0.2, 0.2);
@@ -211,7 +227,7 @@ export class CircuitRace {
     const stopping = this.state === "finished" && c.finished && c.v > 15;
     const st = stepCar(c, kHere, steer,
       { gas: gas && !stopping, brake: brake || stopping, G, top, a0: p.a0 * band, offroad: tr.offroad }, dt);
-    this.barrier(c);
+    this.barrier(c, dt);
     return st.ds;
   }
 
@@ -263,7 +279,7 @@ export class CircuitRace {
       const reachS = (a.len + b.len) / 2 - 0.2, reachX = (a.wid + b.wid) / 2 - 0.1;
       if (Math.abs(ds) < reachS && Math.abs(b.x - a.x) < reachX) {
         // same momentum-based solver for everyone (s is unwrapped progress, so use the wrapped gap)
-        const rel = resolveContact(a, b, ds, reachS, reachX);
+        const rel = resolveContact(a, b, ds, reachS, reachX, dt);
         if ((a.isPlayer || b.isPlayer) && this.state === "run" && !this.contactCool && rel > 1) {
           this.contacts++; this.shake = 0.35; this.contactCool = 0.8;
           this.hooks.onToast("Contatto!", "bad");

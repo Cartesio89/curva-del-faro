@@ -155,7 +155,7 @@ export class Race {
             this.shield = 0; this.ghost = 1.2; t.hit = true;
             this.hooks.onToast("Scudo!", "good");
           } else {
-            const rel = resolveContact(me, t, ds, reachS, reachX);
+            const rel = resolveContact(me, t, ds, reachS, reachX, dt);
             if (!t.contact && rel > 2.5) {
               this.crashes++; t.hit = true; this.shake = Math.min(0.6, 0.2 + rel * 0.02);
               this.hooks.onToast("Botto!", "bad");
@@ -228,12 +228,12 @@ export class Race {
       const diff = t.target - t.x;
       t.latV = Math.sign(diff) * Math.min(Math.abs(diff) / dt, 1.3);
       t.x += Math.sign(diff) * Math.min(Math.abs(diff), 1.3 * dt);
-      t.phi *= 0.9;
+      t.phi *= Math.pow(0.9, dt * 60);
     }
     // traffic never overlaps other traffic
     for (let i = 0; i < this.traffic.length; i++) for (let j = i + 1; j < this.traffic.length; j++) {
       const a = this.traffic[i], b = this.traffic[j];
-      resolveContact(a, b, b.s - a.s, (a.len + b.len) / 2 - 0.1, (a.wid + b.wid) / 2 - 0.05);
+      resolveContact(a, b, b.s - a.s, (a.len + b.len) / 2 - 0.1, (a.wid + b.wid) / 2 - 0.05, dt);
     }
     const keep = [];
     for (const t of this.traffic) { if (t.s > this.s - 40) keep.push(t); else this.scene.remove(t.obj); }

@@ -252,3 +252,19 @@ body.tilt-mode .btn-steer { display: none; }
   .side-card { top: 6px; bottom: 6px; }
   .big-go { padding-block: 8px; }
 }
+
+/* Retroview: a rectangle with a tap symbol and the word, clearly a button */
+.rear-btn { width: auto; height: 40px; padding: 0 10px 0 8px; border-radius: 9px; display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--f-ui, inherit); font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: lowercase; }
+.rear-btn svg { width: 20px; height: 20px; flex: none; }
+@media (max-height: 520px) and (orientation: landscape) { .rear-btn { width: auto; height: 36px; font-size: 12px; } }
+
+/* Pause: a big P */
+.pause-btn { font-family: var(--f-display); font-size: 20px; min-width: 44px; min-height: 36px; padding: 0 12px; font-weight: 800; }
+@media (max-height: 520px) and (orientation: landscape) { .pause-btn { font-size: 17px; min-height: 30px; } }
+
+/* Pre-race */
+.big-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.big-opts .opt { padding: 12px 8px; font-size: 17px; font-weight: 700; }
+.big-opts .opt small { color: var(--ink-dim); font-weight: 500; margin-top: 4px; }
+.pre h3 { margin: 4px 0 0; }

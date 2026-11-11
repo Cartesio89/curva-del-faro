@@ -47,7 +47,7 @@ export function smoothSteer(current, target, dt) {
 // Momentum-conserving impulse with a little bounce, positions separated in proportion to mass.
 // Symmetric: nobody is favoured, only mass and speed matter. Returns the closing speed (m/s).
 export const massKg = (m) => 1100 + (m || 0.5) * 900; // data mass 0..1 → kg
-export function resolveContact(a, b, ds, reachS, reachX) {
+export function resolveContact(a, b, ds, reachS, reachX, dt = 1 / 60) {
   const ma = massKg(a.mass), mb = massKg(b.mass);
   const dx = b.x - a.x;
   const penS = reachS - Math.abs(ds), penX = reachX - Math.abs(dx);
@@ -77,6 +77,7 @@ export function resolveContact(a, b, ds, reachS, reachX) {
     b.phi = (b.phi || 0) + dir * 0.05 * wb * Math.min(1, relLat / 4);
   }
   // rubbing costs a little speed to both
-  a.v *= 0.995; b.v *= 0.995;
+  const rub = Math.pow(0.9993, dt * 60);   // ~4%/s while rubbing, whatever the frame rate
+  a.v *= rub; b.v *= rub;
   return Math.max(0, relLat);
 }
