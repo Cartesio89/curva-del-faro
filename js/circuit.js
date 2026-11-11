@@ -8,6 +8,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 const CAR_LEN = 4.4, CAR_WID = 1.9;
+export const AI_LINE = 1.3;
 
 // A lap race on a closed circuit against 5 AI drivers.
 export class CircuitRace {
@@ -34,17 +35,24 @@ export class CircuitRace {
     this.world = new CircuitWorld(scene, { ...track, circuit });
     this.world.update(0);
     this.L = this.world.loopL;
+    this.line = this.world.racingLine();
     this.laps = circuit.laps;
 
     // cars: 5 AI on the first slots, the player starts last
     // AI cars start from the player's car *as it leaves the factory* (so the player's own parts are a real edge),
     // then get a random setup whose effects are visible both on the car and on the stopwatch.
-    const pStock = performance(car, defaultConfig(car));
+    const pStock0 = performance(car, defaultConfig(car)), pAct = performance(car, cfg);
+    // the field also gets 60 % of the player's upgrades: parts stay worth buying (40 % edge) but cannot buy a walkover
+    const share = (k) => pStock0[k] * (1 + 0.6 * (pAct[k] / pStock0[k] - 1));
+    const pStock = { ...pStock0, topMs: share("topMs"), a0: share("a0"), grip: share("grip"), topKmh: share("topKmh") };
     const level = [0.97, 0.99, 1.01, 1.03, 1.05][Math.max(0, CIRCUITS.indexOf(circuit))];
+    // skill = share of the grip limit the AI dares to use (1 = perfect driver). Calibrated on real laps:
+    // a good human with a tuned car is around 0.65-0.70. Each circuit asks a bit more.
+    const skill0 = [0.56, 0.58, 0.6, 0.62, 0.64][Math.max(0, CIRCUITS.indexOf(circuit))];
     const names = AI_NAMES.slice().sort(() => Math.random() - 0.5);
     this.cars = [];
     for (let j = 0; j < 5; j++) {
-      const rel = level * rnd(0.98, 1.04) * (j === 0 ? 1.03 : 1); // slot 0 is the pace-setter
+      const rel = level * rnd(0.98, 1.04) * (j === 0 ? 1.01 : 1); // slot 0 is the pace-setter
       const want = pStock.topKmh * rel;
       const model = CARS.slice().sort((a, b) => Math.abs(a.top - want) - Math.abs(b.top - want))[0];
       const mcfg = { ...defaultConfig(model), color: COLORS[(j * 3 + 1) % COLORS.length] };
@@ -57,7 +65,7 @@ export class CircuitRace {
         perf: { topMs: pStock.topMs * rel * (mSet.topMs / mStock.topMs), a0: pStock.a0 * rel * (mSet.a0 / mStock.a0),
                 grip: pStock.grip * rnd(0.98, 1.02) * (mSet.grip / mStock.grip) },
         mass: model.mass, setup: mcfg,
-        skill: clamp(rnd(0.93, 0.99) + (j === 0 ? 0.03 : 0), 0.9, 1.02), aggr: rnd(0.3, 0.9), carId: model.id
+        skill: clamp(skill0 + rnd(0, 0.07) + (j === 0 ? 0.02 : 0), 0.5, 0.8), aggr: rnd(0.3, 0.9), carId: model.id
       }, j));
     }
     const pObj = buildCar(car, cfg);
@@ -122,41 +130,51 @@ export class CircuitRace {
     return 1;
   }
 
-  // AI: decides only gas, brake and steering; the car obeys the same physics as the player.
+  // Speed the car can hold at every point of the racing line (grip), then braking and acceleration passes.
+  speedProfile(c) {
+    const L = this.line, n = L.n, ds = L.segL, tr = this.track, p = c.perf;
+    const G = p.grip * tr.grip * GRIP_ARCADE * c.skill * 0.985;
+    const brake = 11.5 * c.skill, top = p.topMs;
+    const v = new Float64Array(n);
+    for (let i = 0; i < n; i++) { const k = L.ka[i]; v[i] = Math.min(top, k > 1e-5 ? Math.sqrt(G / k) : top); }
+    for (let pass = 0; pass < 2; pass++) for (let i = n - 1; i >= 0; i--) {
+      const j = (i + 1) % n; v[i] = Math.min(v[i], Math.sqrt(v[j] * v[j] + 2 * brake * ds));
+    }
+    for (let pass = 0; pass < 2; pass++) for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, a = p.a0 * Math.max(0.08, 1 - Math.pow(v[i] / top, 1.8));
+      v[j] = Math.min(v[j], Math.sqrt(v[i] * v[i] + 2 * a * ds));
+    }
+    return v;
+  }
+
+  // AI: follows the racing line and its speed profile, overtakes, closes the door on the player, makes small mistakes.
+  // It only decides gas, brake and steering: the car obeys the same physics as the player's.
   driveAI(c, dt) {
-    const w = this.world, tr = this.track, p = c.perf;
+    const w = this.world, tr = this.track, p = c.perf, Ln = this.line;
+    if (!c.vprof) c.vprof = this.speedProfile(c);
     const ahead = this.wrapDs(c.s - this.player.s);
     let band = 1;
-    if (!c.finished && this.state === "run") band = ahead < -80 ? 1.04 : ahead > 160 ? 0.98 : 1;
+    if (!c.finished && this.state === "run") band = ahead < -80 ? 1.03 : ahead > 160 ? 0.98 : 1;
     if (c.mistakeT > 0) c.mistakeT -= dt;
-    else if (this.state === "run" && Math.random() < dt * (1.06 - c.skill) * 0.08) { c.mistakeT = rnd(0.6, 1.2); c.mistakeKind = Math.random() < 0.5 ? "wide" : "early"; }
+    else if (this.state === "run" && Math.random() < dt * Math.max(0.002, (0.8 - c.skill) * 0.06)) { c.mistakeT = rnd(0.6, 1.2); c.mistakeKind = Math.random() < 0.5 ? "wide" : "early"; }
     const mist = c.mistakeT > 0 ? c.mistakeKind : null;
     const G = p.grip * tr.grip * GRIP_ARCADE;
-    const Gplan = G * c.skill * 0.97 * (mist === "wide" ? 1.15 : 1);
-    const brakeA = 11.5 * c.skill;
     const top = p.topMs * band * this.draft(c);
-    let vt = top;
-    for (let d = 0; d <= 220; d += 10) {
-      const k = Math.abs(w.sample(c.s + d).k);
-      if (k > 1e-4) vt = Math.min(vt, Math.sqrt(Math.max(0, (Gplan / k) + 2 * brakeA * Math.max(0, d - 6))));
-    }
-    if (mist === "early") vt *= 0.92;
+    const sm = ((c.s % this.L) + this.L) % this.L;
+    const idx = (k) => ((Math.floor((sm + k) / Ln.segL) % Ln.n) + Ln.n) % Ln.n;
+    let vt = Math.min(top, c.vprof[idx(c.v * 0.15 + 1)] * (mist === "early" ? 0.9 : mist === "wide" ? 1.03 : 1));
     // never drive into the back of the car ahead
     for (const o of this.cars) {
       if (o === c) continue;
       const ds = this.wrapDs(o.s - c.s);
       if (ds > 0 && ds < 14 && Math.abs(o.x - c.x) < 2.1) vt = Math.min(vt, o.v + Math.max(0, ds - 6) * 0.8);
     }
-    const gas = c.v < vt - 0.3;
-    const brake = c.v > vt + 1.2;
+    const gas = c.v < vt - 0.1;
+    const brake = c.v > vt + 0.8;
 
-    // racing line: outside before a corner, inside at the apex
-    const kNow = w.sample(c.s + 8).k, kNext = w.sample(c.s + 60).k;
-    let line = 0;
-    if (Math.abs(kNow) > 0.004) line = Math.sign(kNow) * Math.min(3.0, Math.abs(kNow) * 800);
-    else if (Math.abs(kNext) > 0.004) line = -Math.sign(kNext) * 2.8;
-
-    // overtake slower cars; close the door only on the player (no fighting between AI cars)
+    // line to follow: racing line, shifted to pass slower cars or to block the player
+    const i0 = idx(0.5);
+    let line = Ln.x[i0];
     let blocker = null, chaser = null;
     for (const o of this.cars) {
       if (o === c) continue;
@@ -168,26 +186,28 @@ export class CircuitRace {
     if (blocker) {
       const o = blocker.o;
       if (!c.passSide || c.passT <= 0) {
-        const roomL = o.x - -(ROAD_HALF - 0.8), roomR = (ROAD_HALF - 0.8) - o.x;
+        const roomL = o.x + (ROAD_HALF - 0.8), roomR = (ROAD_HALF - 0.8) - o.x;
         c.passSide = roomR > roomL ? 1 : -1; c.passT = 2.5;
       }
-      line = o.x + c.passSide * 3.4;
-      mode = "pass";
+      line = o.x + c.passSide * 3.4; mode = "pass";
     } else if (chaser && this.state === "run" && c.aggr > 0.4) {
       if (!(c.blockT > 0)) { c.blockX = clamp(chaser.o.x, -3, 3); c.blockT = rnd(1.4, 2.4); }
-      line = c.blockX;
-      mode = "block";
+      line = c.blockX; mode = "block";
     }
+    if (mist === "wide") line += -Math.sign(w.sample(c.s + 5).k || 1) * 2.5;
     c.passT = (c.passT || 0) - dt;
     c.blockT = (c.blockT || 0) - dt;
     c.mode = mode;
     line = clamp(line, -(ROAD_HALF - 0.8), ROAD_HALF - 0.8);
-    // the AI steers by hand too: yaw to follow the bend plus a correction toward its line
+    // steering like a driver: turn as much as the line bends (feed-forward) and correct heading and position errors
     const kHere = w.sample(c.s + 0.5).k;
-    const phiWant = clamp((line - c.x) * 0.1, -0.18, 0.18);
-    const yawWant = c.v * kHere + (phiWant - c.phi) * 3;
+    const onLine = mode === "line" && !mist;
+    const kff = onLine ? Ln.k[i0] : kHere;
+    const phiT = onLine ? Ln.phi[i0] : 0;
+    const phiCmd = phiT + clamp((line - c.x) * 0.15, -0.2, 0.2);
+    const yawWant = c.v * kff + (phiCmd - c.phi) * 5;
     const steer = clamp(yawWant / Math.max(1e-3, maxYaw(c.v, G)), -1, 1);
-    let stopping = this.state === "finished" && c.finished && c.v > 15;
+    const stopping = this.state === "finished" && c.finished && c.v > 15;
     const st = stepCar(c, kHere, steer,
       { gas: gas && !stopping, brake: brake || stopping, G, top, a0: p.a0 * band, offroad: tr.offroad }, dt);
     this.barrier(c);

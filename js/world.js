@@ -731,6 +731,52 @@ export class CircuitWorld extends World {
     this.built = false;
   }
   get length() { return this.loopL; }
+
+  // Racing line: lateral offset x(s) that straightens the path inside the road (iterative smoothing,
+  // close to a minimum-curvature line), plus the curvature of that path. Computed once per circuit.
+  // Ideal line, computed in the same road frame the physics uses (x = offset from the centre, phi = heading vs road).
+  // The car needs a yaw rate v*(k + x''): the line "pulls the string" so that k + x'' is as small as possible,
+  // using the road width (|x| <= lim). keff = curvature the car really has to turn on that line.
+  racingLine(limArg) {
+    if (this.line && !limArg) return this.line;
+    const n = this.k.length, lim = limArg || ROAD_HALF - 1.1, h = this.segL;
+    const kr = new Float64Array(n);
+    for (let i = 0; i < n; i++) kr[i] = this.k[i];
+    // minimise sum(keff^2) with |x| <= lim (projected gradient, coarse-to-fine so long corners converge)
+    const x = new Float64Array(n);
+    const keff = (i) => kr[i] + (x[(i - 1 + n) % n] - 2 * x[i] + x[(i + 1) % n]) / (h * h);
+    for (const st of [16, 8, 4, 2, 1]) {
+      const hs = h * st, lr = 0.05 * hs * hs * hs * hs, its = st === 1 ? 3000 : 1500;
+      const g = new Float64Array(n);
+      for (let it = 0; it < its; it++) {
+        for (let i = 0; i < n; i += st) {
+          const a = (i - st + n) % n, b = (i + st) % n;
+          g[i] = kr[i] + (x[a] - 2 * x[i] + x[b]) / (hs * hs);
+        }
+        for (let i = 0; i < n; i += st) {
+          const a = (i - st + n) % n, b = (i + st) % n;
+          const d2 = (g[a] - 2 * g[i] + g[b]) / (hs * hs);
+          x[i] = Math.max(-lim, Math.min(lim, x[i] - lr * d2));
+        }
+        if (st > 1) for (let i = 0; i < n; i += st) { // fill in between coarse points
+          const b = (i + st) % n;
+          for (let j = 1; j < st && i + j < n; j++) x[i + j] = x[i] + (x[b] - x[i]) * j / st;
+        }
+      }
+    }
+    const ke = new Float64Array(n), phi = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = (i - 1 + n) % n, b = (i + 1) % n;
+      ke[i] = kr[i] + (x[a] - 2 * x[i] + x[b]) / (h * h);
+      phi[i] = Math.atan2(x[b] - x[i], h);
+    }
+    // for the speed limit use the worst curvature nearby (never average a sharp apex away)
+    const ka = new Float64Array(n);
+    for (let i = 0; i < n; i++) ka[i] = Math.max(Math.abs(ke[(i - 1 + n) % n]), Math.abs(ke[i]), Math.abs(ke[(i + 1) % n]));
+    const line = { x, k: ke, ka, phi, n, segL: h };
+    if (!limArg) this.line = line;
+    return line;
+  }
   ensure() {}
   placeItems() {}
   terrainY() { return 0; }

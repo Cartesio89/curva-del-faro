@@ -204,3 +204,8 @@ input:focus { outline: none; border-color: var(--amber); }
   -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent); }
 .garage .actions { position: static; margin: 0; padding: 0; background: none; border: 0; }
 @media (max-width: 760px), (max-aspect-ratio: 1/1) { .garage { max-height: 66%; } }
+/* rear-view button on the left, under the map */
+.sub { right: 10px; }
+.rear-btn { left: 10px; right: auto; top: 270px; }
+.rear-btn.nomap { top: 150px; }
+@media (min-width: 761px) { .rear-btn { top: 280px; } .rear-btn.nomap { top: 120px; } }

@@ -585,7 +585,9 @@ function updateCorner(h) {
 }
 function drawMinimap() {
   const cv = $("minimap");
-  if (!race || !race.minimap) { cv.hidden = true; return; }
+  const noMap = !race || !race.minimap;
+  $("rearBtn").classList.toggle("nomap", noMap);
+  if (noMap) { cv.hidden = true; return; }
   cv.hidden = false;
   const m = race.minimap(), g = cv.getContext("2d"), S = cv.width;
   if (!race.mapBox) {
