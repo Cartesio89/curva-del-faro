@@ -355,6 +355,9 @@ $("tBack").addEventListener("click", goHome);
 
 // ------------------------------------------------------------------ leaderboard
 // kind: "endless" (top 10 runs), "races" (championship points) or "circuit" (top 10 races on one circuit)
+const kmh1 = (v) => (v > 0 ? Math.round(v * 10) / 10 : null);
+const fmtKmh = (v) => (v == null ? "v.max n.d." : `${Number(v).toLocaleString("it-IT", { maximumFractionDigits: 1 })} km/h max`);
+function showVmax(v) { const e = $("oVmax"); e.hidden = !(v > 0); e.textContent = v > 0 ? `Velocità massima raggiunta: ${Math.round(v)} km/h` : ""; }
 function renderBoard(ol, rows, highlightName, kind) {
   ol.textContent = "";
   const li0 = (text) => { const li = document.createElement("li"); li.className = "empty"; li.textContent = text; ol.appendChild(li); };
@@ -368,7 +371,12 @@ function renderBoard(ol, rows, highlightName, kind) {
     const sub = document.createElement("small");
     const m = document.createElement("span"); m.className = "m";
     const t = document.createElement("span"); t.className = "t";
-    if (kind === "challenges") {
+    if (kind === "speed") {
+      const where = r.mode === "endless" ? trackById(r.place).name : (circuitById(r.place) || { name: r.place }).name;
+      sub.textContent = `${carById(r.car).name} · ${r.mode === "endless" ? "pista infinita" : r.mode === "challenge" ? "sfida" : "gara"} ${where}`;
+      m.textContent = `${Number(r.max_kmh).toLocaleString("it-IT", { maximumFractionDigits: 1 })} km/h`;
+      t.textContent = "";
+    } else if (kind === "challenges") {
       sub.textContent = `${r.challenges === 1 ? "1 sfida" : r.challenges + " sfide"} · ${r.races === 1 ? "1 gara" : r.races + " gare"}`;
       m.textContent = `${r.wins} ${r.wins === 1 ? "vittoria" : "vittorie"}`;
       t.textContent = r.races ? Math.round((r.wins / r.races) * 100) + "%" : "";
@@ -389,59 +397,73 @@ function renderBoard(ol, rows, highlightName, kind) {
       m.textContent = fmtM(r.distance_m);
       t.textContent = Math.round(r.time_s) + " s";
     }
-    // when the record was set (for overall boards: the latest race counted)
+    // second line: top speed reached in that record (overall boards: the highest of the races counted;
+    // records set before the speed was measured, before 12 nov, show "v.max n.d.") and when it was set
+    const meta = document.createElement("small"); meta.className = "when";
+    const bits = [];
+    if (kind !== "speed") bits.push(fmtKmh(r.max_kmh));
     if (r.created_at) {
       const d = new Date(r.created_at);
       if (!isNaN(d)) {
-        const dt = document.createElement("small"); dt.className = "when";
         const agg = kind === "races" || kind === "challenges";
-        dt.textContent = (agg ? "ultima gara " : "") + d.toLocaleDateString("it-IT", { day: "numeric", month: "short", year: d.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined })
-          + " " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
-        sub.append(" · ", dt);
+        bits.push((agg ? "ultima gara " : "") + d.toLocaleDateString("it-IT", { day: "numeric", month: "short", year: d.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined })
+          + " " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" }));
       }
     }
+    meta.textContent = bits.join(" · ");
     nm.appendChild(sub);
+    if (meta.textContent) nm.appendChild(meta);
     li.append(pos, nm, m, t); ol.appendChild(li);
   });
 }
 // kind: "endless" | "races"; filter: track id / circuit id, or "" for the overall board
-async function openBoard(kind, filter = "") {
-  kind = ["races", "champ", "challenges"].includes(kind) ? kind : "endless";
+async function openBoard(kind, filter = "", car = "") {
+  kind = ["races", "champ", "challenges", "speed"].includes(kind) ? kind : "endless";
   const tabs = $("boardTabs"); tabs.textContent = "";
-  for (const [k, label] of [["endless", "Pista infinita"], ["races", "Gare"], ["champ", "Campionato"], ["challenges", "Sfide"]]) {
+  for (const [k, label] of [["endless", "Pista infinita"], ["races", "Gare"], ["champ", "Campionato"], ["challenges", "Sfide"], ["speed", "Velocità"]]) {
     const b = document.createElement("button");
     b.className = "tab" + (k === kind ? " on" : ""); b.textContent = label; b.setAttribute("role", "tab");
-    b.addEventListener("click", () => openBoard(k));
+    b.addEventListener("click", () => openBoard(k, "", car));
     tabs.appendChild(b);
   }
   const fl = $("boardFilters"); fl.textContent = "";
   const opts = kind === "champ" || kind === "challenges" ? []
     : kind === "races"
     ? [["", "Generale"], ...CIRCUITS.map((c) => [c.id, c.name])]
+    : kind === "speed"
+    ? [["", "Ovunque"], ...TRACKS.map((t) => [t.id, t.name]), ...CIRCUITS.map((c) => [c.id, c.name])]
     : [["", "Tutte le piste"], ...TRACKS.map((t) => [t.id, t.name])];
   for (const [id, label] of opts) {
     const b = document.createElement("button");
     b.className = "opt" + (id === filter ? " on" : ""); b.textContent = label;
-    b.addEventListener("click", () => openBoard(kind, id));
+    b.addEventListener("click", () => openBoard(kind, id, car));
     fl.appendChild(b);
   }
-  fl.hidden = kind === "champ" || kind === "challenges";
-  $("boardNote").textContent = kind === "challenges"
+  fl.hidden = !opts.length;
+  // car filter, on every board
+  const sel = $("boardCar");
+  if (!sel.options.length) {
+    sel.appendChild(new Option("Tutte le auto", ""));
+    for (const c of CARS) sel.appendChild(new Option(c.name, c.id));
+    sel.addEventListener("change", () => openBoard(sel.dataset.kind, sel.dataset.filter, sel.value));
+  }
+  sel.value = car; sel.dataset.kind = kind; sel.dataset.filter = filter;
+  const withCar = car ? ` Solo ${carById(car).name}.` : "";
+  $("boardNote").textContent = (kind === "speed"
+    ? "Le 10 velocità più alte mai raggiunte, in qualunque modalità (misurate dal 12 novembre)."
+    : kind === "challenges"
     ? "Gare online contro altri giocatori veri (le IA riempiono la griglia). Vince chi arriva primo tra i giocatori veri."
     : kind === "champ"
     ? "I 10 migliori campionati conclusi: prima i punti totali delle 5 tappe, poi il tempo totale sommato."
     : kind === "races"
     ? (filter ? "Le 10 migliori gare su questo circuito: prima il piazzamento, poi il tempo totale."
               : "Generale: per ogni circuito conta il miglior arrivo di ciascun pilota (25, 18, 15, 12, 10, 8 punti dal 1° al 6°).")
-    : (filter ? "I 10 migliori risultati su questa pista." : "I 10 migliori risultati su tutte le piste.");
+    : (filter ? "I 10 migliori risultati su questa pista." : "I 10 migliori risultati su tutte le piste.")) + withCar;
   show("scrBoard");
   const ol = $("boardList");
   ol.innerHTML = '<li class="empty">Carico…</li>';
-  let rows, k;
-  if (kind === "challenges") { rows = await api.topChallenges(); k = "challenges"; }
-  else if (kind === "champ") { rows = await api.topChamp(); k = "champ"; }
-  else if (kind === "races") { rows = filter ? await api.topCircuit(filter) : await api.topRaces(); k = filter ? "circuit" : "races"; }
-  else { rows = await api.topEndless(filter || null); k = "endless"; }
+  const k = kind === "races" && filter ? "circuit" : kind;
+  const rows = await api.board(k, filter, car);
   renderBoard(ol, rows, profile && profile.name, k);
 }
 $("bBack").addEventListener("click", goHome);
@@ -588,6 +610,7 @@ function startCircuit(c, ch) {
     `${c.name}, ${c.laps} giri, contro 5 piloti. Con ${car.name}.`);
 }
 async function finishCircuit(st) {
+  showVmax(st.maxKmh);
   const { car, circuit } = race.meta;
   const beforeNext = CIRCUITS.filter((c) => circuitUnlocked(c, profile)).map((c) => c.id);
   $("oTitle").textContent = st.position === 1 ? "Vittoria!" : st.position <= 3 ? "Sul podio!" : "Gara finita";
@@ -618,7 +641,7 @@ async function finishCircuit(st) {
   const save = $("oSave");
   save.textContent = "Salvo la gara…";
   if (ch) return finishChampStage(st, ch, save);
-  const r = await api.submitCircuit(token, circuit.id, car.id, st.position, Math.round(st.time * 10) / 10, Math.round(st.best * 10) / 10);
+  const r = await api.submitCircuit(token, circuit.id, car.id, st.position, Math.round(st.time * 10) / 10, Math.round(st.best * 10) / 10, kmh1(st.maxKmh));
   if (r && r.profile) {
     setProfile(r.profile, true);
     save.textContent = `Salvata: +${fmtC(r.earned)}.`;
@@ -638,7 +661,7 @@ function champOrder(order, position) {
   return o;
 }
 async function finishChampStage(st, ch, save) {
-  const r = await api.champStage(token, ch.id, st.position, Math.round(st.time * 10) / 10, Math.round(st.best * 10) / 10, champOrder(st.order, st.position));
+  const r = await api.champStage(token, ch.id, st.position, Math.round(st.time * 10) / 10, Math.round(st.best * 10) / 10, champOrder(st.order, st.position), false, kmh1(st.maxKmh));
   if (!(r && r.champ)) {
     save.textContent = (ERRORS[r && r.error] || "Tappa non salvata.") + " Puoi rifare la tappa.";
     if (r && r.error === "no_session") { token = null; store.del("faro-token"); }
@@ -752,6 +775,7 @@ function endRace() {
   clearInput();
 }
 async function finishRun(st) {
+  showVmax(st.maxKmh);
   const { car, track } = race.meta;
   const before = { cars: CARS.filter((c) => carUnlocked(c, profile)).map((c) => c.id), tracks: TRACKS.filter((t) => trackUnlocked(t, profile)).map((t) => t.id) };
   $("oTitle").textContent = "Tempo scaduto";
@@ -768,7 +792,7 @@ async function finishRun(st) {
   const save = $("oSave");
   if (st.distance < 1 || st.time < 1) { save.textContent = ""; return; }
   save.textContent = "Salvo la partita…";
-  const r = await api.submitRun(token, track.id, car.id, st.distance, Math.round(st.time * 10) / 10, st.cps, st.coins);
+  const r = await api.submitRun(token, track.id, car.id, st.distance, Math.round(st.time * 10) / 10, st.cps, st.coins, kmh1(st.maxKmh));
   if (r && r.profile) {
     const prevBest = (profile.best && profile.best[track.id] && profile.best[track.id].best_m) || 0;
     setProfile(r.profile, true);

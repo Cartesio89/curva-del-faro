@@ -366,6 +366,7 @@ export function initOnline(ctx) {
       li.append(pos, nm, tt); ol.appendChild(li);
     });
     $("oChamp").hidden = true; $("oUnlocks").textContent = "";
+    const vm = myFinish && myFinish.maxKmh; $("oVmax").hidden = !(vm > 0); $("oVmax").textContent = vm > 0 ? `Velocità massima raggiunta: ${Math.round(vm)} km/h` : "";
     $("oMp").hidden = false;
     $("again").hidden = true;
     $("toBox").textContent = "Esci dalla sfida";
@@ -378,7 +379,8 @@ export function initOnline(ctx) {
     if (!mine || mine.time == null || !myFinish) { save.textContent = "Non sei arrivato al traguardo: nessun premio."; $("oHit").textContent = ctx.fmtC(0); return; }
     save.textContent = "Salvo il risultato…";
     const realRank = humans.findIndex((h) => h.name === me()) + 1;
-    const r = await ctx.api.challengeResult(ctx.token(), room.id, m.raceNo, myIdx + 1, realRank, humans.length, mine.time, myFinish.best);
+    const vmax = myFinish.maxKmh > 0 ? Math.round(myFinish.maxKmh * 10) / 10 : null;
+    const r = await ctx.api.challengeResult(ctx.token(), room.id, m.raceNo, myIdx + 1, realRank, humans.length, mine.time, myFinish.best, vmax);
     if (r && r.profile) { ctx.setProfile(r.profile, true); save.textContent = `Salvato: +${ctx.fmtC(r.earned)}.`; $("oHit").textContent = ctx.fmtC(r.earned); }
     else save.textContent = ctx.ERRORS[r && r.error] || "Risultato non salvato.";
   }
@@ -395,16 +397,17 @@ export function initOnline(ctx) {
     const sel = document.createElement("select"); sel.id = "nextCircuit";
     for (const c of CIRCUITS) { const o = document.createElement("option"); o.value = c.id; o.textContent = c.name; if (c.id === room.circuit) o.selected = true; sel.appendChild(o); }
     const again = document.createElement("button"); again.className = "go"; again.textContent = "Ripeti la pista";
-    again.addEventListener("click", () => decide(room.circuit, false));
+    again.addEventListener("click", () => decide(room.circuit));
     const change = document.createElement("button"); change.className = "ghost"; change.textContent = "Cambia pista";
-    change.addEventListener("click", () => decide(sel.value, true));
+    change.addEventListener("click", () => decide(sel.value));
+    const nn = document.createElement("small"); nn.className = "note"; nn.textContent = "Ogni gara nuova: auto nuova estratta a caso.";
     const row = document.createElement("div"); row.className = "actions"; row.append(again, sel, change);
-    box.append(p, row);
+    box.append(p, row, nn);
   }
-  async function decide(circuit, newCar) {
+  async function decide(circuit) {
     const r = await ctx.api.roomNext(ctx.token(), room.id, circuit);
     if (!r || !r.room) { ctx.toast(ctx.ERRORS[r && r.error] || "Non riuscito.", "bad"); return; }
-    const pick = newCar ? randomCarSetup() : { car: room.car, setup: room.setup };
+    const pick = randomCarSetup();   // every new race of a challenge: a new random car
     const msg = { circuit, raceNo: r.room.race_no, car: pick.car, setup: pick.setup };
     roomCh.send("next", msg);
     onNext(msg);

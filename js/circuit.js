@@ -169,6 +169,7 @@ export class CircuitRace {
     const st = stepCar(c, k, c.steerSm, { gas: input.gas, brake: input.brake, G: p.grip * tr.grip * GRIP_ARCADE * (this.slip > 0 ? 0.6 : 1),
       top: p.topMs * this.draft(c) * (boost ? 1.2 : 1), a0: p.a0 * (boost ? 1.6 : 1), offroad: tr.offroad }, dt);
     this.pickups(c);
+    if (this.state === "run" && c.v > (c.maxV || 0)) c.maxV = c.v;
     this.barrier(c, dt);
     return st.ds;
   }
@@ -412,7 +413,7 @@ export class CircuitRace {
   finishPlayer() {
     this.state = "finished";
     if (this.mp) {   // online: the final order comes from the host once everybody is home
-      this.hooks.onFinish({ mp: true, time: this.player.finishTime, best: this.player.best, contacts: this.contacts });
+      this.hooks.onFinish({ mp: true, time: this.player.finishTime, best: this.player.best, contacts: this.contacts, maxKmh: (this.player.maxV || 0) * 3.6 });
       return;
     }
     const pos = this.finishedOrder.indexOf(this.player) + 1;
@@ -420,7 +421,7 @@ export class CircuitRace {
     const times = this.projectFinishTimes();
     const order = this.cars.map((c) => ({ name: c.name, isPlayer: c.isPlayer, carId: c.carId, time: times.get(c), best: c.isPlayer ? p.best : null, setup: c.setup }))
       .sort((a, b) => a.time - b.time);
-    this.hooks.onFinish({ position: pos, total: this.cars.length, time: p.finishTime, best: p.best, contacts: this.contacts, order });
+    this.hooks.onFinish({ position: pos, total: this.cars.length, time: p.finishTime, best: p.best, contacts: this.contacts, order, maxKmh: (p.maxV || 0) * 3.6 });
   }
 
   // Runs the rest of the race off-screen on a copy of the state to get everybody's finishing time,

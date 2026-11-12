@@ -128,6 +128,7 @@ export class Race {
     this.updateTraffic(dt);
     this.world.update(this.s);
 
+    if (live && this.v > (this.maxV || 0)) this.maxV = this.v;
     // off the edge where the ground is far below (the road runs over a gap, like a bridge): the car falls
     if (live && Math.abs(this.x) > ROAD_HALF + 1.1 && this.world.dropAt(this.s, this.x) > 2.5) {
       this.fall = { t: 0, vy: 0, y0: this.world.sample(this.s, 0).y }; this.fallY = 0;
@@ -199,7 +200,7 @@ export class Race {
       if (this.timeLeft <= 0) {
         this.timeLeft = 0;
         this.state = "over";
-        this.hooks.onFinish({ distance: Math.floor(this.maxS - START_S), time: this.elapsed, cps: this.cpReached, near: this.near, crashes: this.crashes, coins: this.coins });
+        this.hooks.onFinish({ distance: Math.floor(this.maxS - START_S), time: this.elapsed, cps: this.cpReached, near: this.near, crashes: this.crashes, coins: this.coins, maxKmh: (this.maxV || 0) * 3.6 });
       }
     }
   }
@@ -345,7 +346,7 @@ export class Race {
       this.ghost = 2;                                   // no instant crash into a car while restarting
       if (this.timeLeft <= 0) {
         this.timeLeft = 0; this.state = "over";
-        this.hooks.onFinish({ distance: Math.floor(this.maxS - START_S), time: this.elapsed, cps: this.cpReached, near: this.near, crashes: this.crashes, coins: this.coins });
+        this.hooks.onFinish({ distance: Math.floor(this.maxS - START_S), time: this.elapsed, cps: this.cpReached, near: this.near, crashes: this.crashes, coins: this.coins, maxKmh: (this.maxV || 0) * 3.6 });
       } else this.hooks.onToast("Riparti da centro pista", "bad");
     }
   }

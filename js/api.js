@@ -30,21 +30,21 @@ export const api = {
   profile: (token) => rpc("faro_profile", { p_token: token }),
   logout: (token) => rpc("faro_logout", { p_token: token }),
   saveGarage: (token, garage) => rpc("faro_save_garage", { p_token: token, p_garage: garage }),
-  submitRun: (token, track, car, distance, time, cp, coins) =>
-    rpc("faro_submit_run", { p_token: token, p_track: track, p_car: car, p_distance: distance, p_time: time, p_checkpoints: cp, p_coins: coins }),
+  submitRun: (token, track, car, distance, time, cp, coins, maxKmh) =>
+    rpc("faro_submit_run2", { p_token: token, p_track: track, p_car: car, p_distance: distance, p_time: time, p_checkpoints: cp, p_coins: coins, p_max_kmh: maxKmh ?? null }),
   buy: (token, car, item) => rpc("faro_buy", { p_token: token, p_car: car, p_item: item }),
   top: (track) => rpc("faro_top", { p_track: track }),
-  submitCircuit: (token, circuit, car, position, time, bestLap) =>
-    rpc("faro_submit_circuit", { p_token: token, p_circuit: circuit, p_car: car, p_position: position, p_time: time, p_best_lap: bestLap }),
+  submitCircuit: (token, circuit, car, position, time, bestLap, maxKmh) =>
+    rpc("faro_submit_circuit2", { p_token: token, p_circuit: circuit, p_car: car, p_position: position, p_time: time, p_best_lap: bestLap, p_max_kmh: maxKmh ?? null }),
   topLaps: (circuit) => rpc("faro_top_laps", { p_circuit: circuit }),
-  topEndless: (track) => rpc("faro_top_endless", track ? { p_track: track } : {}),
-  topCircuit: (circuit) => rpc("faro_top_circuit", { p_circuit: circuit }),
-  topRaces: () => rpc("faro_top_races", {}),
+  topEndless: (track) => rpc("faro_board", { p_kind: "endless", p_filter: track || null }),
+  topCircuit: (circuit) => rpc("faro_board", { p_kind: "circuit", p_filter: circuit }),
+  topRaces: () => rpc("faro_board", { p_kind: "races" }),
   champCurrent: (token) => rpc("faro_champ_current", { p_token: token }),
   champStart: (token, car, field) => rpc("faro_champ_start", { p_token: token, p_car: car, p_field: field }),
-  champStage: (token, champ, position, time, bestLap, order, retire) =>
-    rpc("faro_champ_stage", { p_token: token, p_champ: champ, p_position: position, p_time: time, p_best_lap: bestLap, p_order: order, p_retire: !!retire }),
-  topChamp: () => rpc("faro_top_champ", {}),
+  champStage: (token, champ, position, time, bestLap, order, retire, maxKmh) =>
+    rpc("faro_champ_stage2", { p_token: token, p_champ: champ, p_position: position, p_time: time, p_best_lap: bestLap, p_order: order, p_retire: !!retire, p_max_kmh: maxKmh ?? null }),
+  topChamp: () => rpc("faro_board", { p_kind: "champ" }),
   roomCreate: (token, circuit, car, setup) => rpc("faro_room_create", { p_token: token, p_circuit: circuit, p_car: car, p_setup: setup }),
   roomInvite: (token, room, name) => rpc("faro_room_invite", { p_token: token, p_room: room, p_name: name }),
   invitesPending: (token) => rpc("faro_invites_pending", { p_token: token }),
@@ -53,9 +53,11 @@ export const api = {
   roomNext: (token, room, circuit) => rpc("faro_room_next", { p_token: token, p_room: room, p_circuit: circuit }),
   roomLeave: (token, room) => rpc("faro_room_leave", { p_token: token, p_room: room }),
   roomStatus: (token, room, status) => rpc("faro_room_status", { p_token: token, p_room: room, p_status: status }),
-  challengeResult: (token, room, raceNo, position, realRank, humans, time, best) =>
-    rpc("faro_challenge_result", { p_token: token, p_room: room, p_race_no: raceNo, p_position: position, p_real_rank: realRank, p_humans: humans, p_time: time, p_best_lap: best }),
-  topChallenges: () => rpc("faro_top_challenges", {})
+  challengeResult: (token, room, raceNo, position, realRank, humans, time, best, maxKmh) =>
+    rpc("faro_challenge_result2", { p_token: token, p_room: room, p_race_no: raceNo, p_position: position, p_real_rank: realRank, p_humans: humans, p_time: time, p_best_lap: best, p_max_kmh: maxKmh ?? null }),
+  topChallenges: () => rpc("faro_board", { p_kind: "challenges" }),
+  // every leaderboard: kind (endless, circuit, races, champ, challenges, speed), track/circuit filter, car filter
+  board: (kind, filter, car) => rpc("faro_board", { p_kind: kind, p_filter: filter || null, p_car: car || null })
 };
 
 export const ERRORS = {

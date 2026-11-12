@@ -330,3 +330,6 @@ button.small { padding: 6px 12px; font-size: 14px; min-height: 0; }
 #radioBtn.on-air { border-color: #3ccf7e; color: #3ccf7e; }
 .mic-btn { font-weight: 800; min-width: 52px; min-height: 36px; background: rgba(60,207,126,0.25); border-color: #3ccf7e; }
 .mic-btn.muted { background: rgba(224,87,74,0.3); border-color: #e0574a; }
+.car-filter { grid-template-columns: auto 1fr; align-items: center; gap: 10px; }
+.vmax { font-weight: 600; color: var(--ink); }
+#boardList small.when, #oBoard small.when { display: block; white-space: normal; overflow: visible; text-overflow: clip; }
