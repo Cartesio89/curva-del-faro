@@ -59,7 +59,10 @@
         </div>
         <div class="pad">
           <button class="btn btn-brake" id="bB" aria-label="Frena">FRENO</button>
-          <button class="btn btn-gas" id="bG" aria-label="Accelera">GAS</button>
+          <div class="gas-col">
+            <button class="btn btn-nos" id="bNos" aria-label="NOS: boost di velocità" hidden>NOS<small id="nosN">0</small></button>
+            <button class="btn btn-gas" id="bG" aria-label="Accelera">GAS</button>
+          </div>
         </div>
       </div>
       <div class="keys">↑ gas · ↓ freno · ← → sterza · C guarda dietro · P pausa</div>
@@ -112,6 +115,7 @@
       <h2 id="roomTitle">Sfida</h2>
       <p class="note" id="roomSub"></p>
       <label class="field"><span>Circuito</span><select id="roomCircuit"></select></label>
+      <label class="check"><input type="checkbox" id="roomItems"> <span>Bonus e malus in pista <small>(NOS, scudi, olio, cantieri)</small></span></label>
       <h3>In griglia</h3>
       <ul class="people" id="roomPlayers"></ul>
       <p class="note" id="roomAi"></p>

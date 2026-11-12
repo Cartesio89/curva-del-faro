@@ -389,6 +389,17 @@ function renderBoard(ol, rows, highlightName, kind) {
       m.textContent = fmtM(r.distance_m);
       t.textContent = Math.round(r.time_s) + " s";
     }
+    // when the record was set (for overall boards: the latest race counted)
+    if (r.created_at) {
+      const d = new Date(r.created_at);
+      if (!isNaN(d)) {
+        const dt = document.createElement("small"); dt.className = "when";
+        const agg = kind === "races" || kind === "challenges";
+        dt.textContent = (agg ? "ultima gara " : "") + d.toLocaleDateString("it-IT", { day: "numeric", month: "short", year: d.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined })
+          + " " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+        sub.append(" · ", dt);
+      }
+    }
     nm.appendChild(sub);
     li.append(pos, nm, m, t); ol.appendChild(li);
   });
@@ -539,13 +550,14 @@ const circuitHooks = {
   onFinish: (st) => {
     if (st.mp) { online.onMyFinish(st); return; }   // online: wait for everybody, the car keeps rolling
     mode = "over"; clearInput(); finishCircuit(st);
-  }
+  },
+  onTake: (id) => online.onTake(id)
 };
 // online challenge race: same car and setup for every real player, grid from the host
-function startMpRace({ circuit, car, setup, grid, hostAI }) {
+function startMpRace({ circuit, car, setup, grid, hostAI, items }) {
   endRace();
   race = new CircuitRace(renderer, trackById(circuit.theme), circuit, car, setup, circuitHooks,
-    { mobile, playerName: profile.name, grid, hostAI });
+    { mobile, playerName: profile.name, grid, hostAI, items });
   race.setAspect(W, H);
   race.meta = { car, circuit, kind: "circuit", mp: true, setup };
   setHudLabels(true);
@@ -880,8 +892,13 @@ function updateHud() {
     put(el.dst, `${h.pos}°`); put($("emDist"), `/${h.total}`);
     put(el.tim, `${h.lap}`); put($("emTime"), `/${h.laps}`);
     put($("lapChip"), `Giro ${fmtLap(h.lapTime)} · Migliore ${fmtLap(h.best)}`);
-    flag(el.gT, "low", false); flag(el.gS, "turbo", false);
-    hide(el.turbo, true); hide(el.shield, true); hide(el.oil, true); hide(el.off, !h.off);
+    flag(el.gT, "low", false); flag(el.gS, "turbo", !!h.nosOn);
+    hide(el.turbo, true); hide(el.off, !h.off);
+    hide(el.shield, !(h.shield > 0)); hide(el.oil, !h.slip);
+    if (h.shield > 0) put(el.shield, h.shield > 1 ? `Scudo ×${h.shield}` : "Scudo");
+    const nb = $("bNos");
+    hide(nb, !h.items);
+    if (h.items) { put($("nosN"), h.nos); flag(nb, "empty", !(h.nos > 0) && !h.nosOn); flag(nb, "boosting", !!h.nosOn); }
     return;
   }
   put($("emDist"), "m"); put($("emTime"), "s");
@@ -900,6 +917,7 @@ const keyMap = { ArrowUp: "gas", KeyW: "gas", Space: "gas", ArrowDown: "brake", 
 addEventListener("keydown", (e) => {
   if (e.target && (e.target.tagName === "INPUT")) return;
   if (e.code === "KeyP" || e.code === "Escape") { if (mode === "paused") resume(); else pause(); return; }
+  if (e.code === "KeyN" || e.code === "Space") { input.nos = true; e.preventDefault(); return; }
   const k = keyMap[e.code];
   if (k && mode === "race") { e.preventDefault(); input[k] = true; }
 });
@@ -922,6 +940,8 @@ function bindPad(btn, key) {
   addEventListener("keyup", (e) => { if (e.code === "KeyC" && race) race.rearView = false; });
 }
 bindPad($("bG"), "gas"); bindPad($("bB"), "brake"); bindPad($("bL"), "left"); bindPad($("bR"), "right");
+// NOS fires once per press (the race clears the request after using it)
+$("bNos").addEventListener("pointerdown", (e) => { e.preventDefault(); input.nos = true; });
 stage.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // ------------------------------------------------------------------ tilt steering + fullscreen
@@ -1035,6 +1055,7 @@ function frame(now) {
     const n = Math.max(1, Math.ceil(dt / STEP - 0.05)), h = dt / n;
     const inp = mpMenu ? NO_INPUT : input;
     for (let i = 0; i < n; i++) race.update(h, inp);
+    input.nos = false;
     if (race.mp) online.tick(race, dt);
     if (!race) { requestAnimationFrame(frame); return; }   // the online results just closed the race
     if (mode === "race" && race.audioState) {

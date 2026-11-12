@@ -2,7 +2,7 @@
 // real players (the host also drives the AI that fill the grid up to 6), results and "what next".
 import { openChannel } from "./net.js";
 import { CARS, CIRCUITS, PARTS, PART_ORDER, COLORS, defaultConfig, circuitById } from "./data.js";
-import { aiSpecs } from "./circuit.js";
+import { aiSpecs, circuitItems } from "./circuit.js";
 
 const $ = (id) => document.getElementById(id);
 const SEND_EVERY = 0.1;            // seconds between state messages (10 per second)
@@ -122,8 +122,10 @@ export function initOnline(ctx) {
     try { roomCh = await openChannel("room-" + r.id, me()); }
     catch (e) { ctx.toast("Collegamento online non disponibile.", "bad"); return; }
     roomCh.onPresence((list) => { room.here = list.map((p) => p.name); renderRoom(); });
-    roomCh.on("roster", refreshRoom);
-    roomCh.on("circuit", (m) => { room.circuit = m.circuit; Object.assign(room, m.car ? { car: m.car, setup: m.setup } : {}); renderRoom(); });
+    // someone joined or changed: refresh the list; the host repeats the race settings for newcomers
+    roomCh.on("roster", () => { refreshRoom(); if (host && room) roomCh.send("circuit", { circuit: room.circuit, items: !!room.items }); });
+    roomCh.on("circuit", (m) => { room.circuit = m.circuit; if ("items" in m) room.items = !!m.items; Object.assign(room, m.car ? { car: m.car, setup: m.setup } : {}); renderRoom(); });
+    roomCh.on("take", (m) => { const r = ctx.race(); if (r && r.mp && m.raceNo === raceNo) r.takeItem(m.id); });
     roomCh.on("start", (m) => beginRace(m));
     roomCh.on("loaded", (m) => onLoaded(m));
     roomCh.on("go", () => { const r = ctx.race(); if (r && r.mp) r.go(); });
@@ -140,8 +142,8 @@ export function initOnline(ctx) {
     if (!room) return;
     const r = await ctx.api.roomGet(ctx.token(), room.id);
     if (r && r.room) {
-      const here = room.here;
-      room = { ...r.room, here };
+      const here = room.here, items = room.items;
+      room = { ...r.room, here, items };
       if (r.room.status === "closed" && !result) { closed("La sfida è stata chiusa."); return; }
       renderRoom();
     }
@@ -161,6 +163,7 @@ export function initOnline(ctx) {
     if (room.shownCar !== room.car + JSON.stringify(room.setup)) { room.shownCar = room.car + JSON.stringify(room.setup); ctx.showCar(car, room.setup); }
     const sel = $("roomCircuit");
     sel.disabled = !host || started;
+    const ib = $("roomItems"); ib.disabled = !host || started; ib.checked = !!room.items;
     if (sel.value !== room.circuit) sel.value = room.circuit;
     const ul = $("roomPlayers"); ul.textContent = "";
     const here = new Set(room.here || []);
@@ -192,7 +195,13 @@ export function initOnline(ctx) {
   $("roomCircuit").addEventListener("change", () => {
     if (!host || !room) return;
     room.circuit = $("roomCircuit").value;
-    roomCh && roomCh.send("circuit", { circuit: room.circuit });
+    roomCh && roomCh.send("circuit", { circuit: room.circuit, items: !!room.items });
+    renderRoom();
+  });
+  $("roomItems").addEventListener("change", () => {
+    if (!host || !room) return;
+    room.items = $("roomItems").checked;
+    roomCh && roomCh.send("circuit", { circuit: room.circuit, items: room.items });
     renderRoom();
   });
 
@@ -206,7 +215,7 @@ export function initOnline(ctx) {
     // random grid: real players and AI mixed
     const colors = COLORS.slice().sort(() => Math.random() - 0.5);
     const grid = [...humans.map((n, i) => ({ name: n, kind: "human", color: colors[i % colors.length] })), ...ai].sort(() => Math.random() - 0.5);
-    const msg = { raceNo, circuit: room.circuit, car: room.car, setup: room.setup, grid };
+    const msg = { raceNo, circuit: room.circuit, car: room.car, setup: room.setup, grid, items: room.items ? circuitItems() : null };
     ctx.api.roomStatus(ctx.token(), room.id, "racing");
     roomCh.send("start", msg);
     beginRace(msg);
@@ -221,7 +230,8 @@ export function initOnline(ctx) {
     loaded = new Set(); loadWait = 0; goSent = false;
     gridHumans = m.grid.filter((g) => g.kind === "human").map((g) => g.name);
     hideInvite();
-    ctx.startMpRace({ circuit: circuitById(m.circuit), car: ctx.carById(m.car), setup: m.setup, grid: m.grid, hostAI: host });
+    room.items = !!m.items;
+    ctx.startMpRace({ circuit: circuitById(m.circuit), car: ctx.carById(m.car), setup: m.setup, grid: m.grid, hostAI: host, items: m.items });
     // the first frame of the track has been drawn: tell the others
     let said = false;
     const say = () => { if (said) return; said = true; const msg = { n: me(), raceNo }; if (roomCh) roomCh.send("loaded", msg); onLoaded(msg); };
@@ -394,6 +404,7 @@ export function initOnline(ctx) {
 
   return {
     start, stop, tick, onMyFinish, exit,
+    onTake: (id) => { if (roomCh) roomCh.send("take", { id, raceNo }); },
     debug: () => ({ loaded: [...loaded], gridHumans, raceNo, host, goSent, loadWait }),
     inChallenge: () => !!room,
     openLobbyRoom: async () => {          // "Sfida un amico" from home without picking anyone yet
