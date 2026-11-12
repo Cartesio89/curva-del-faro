@@ -211,7 +211,8 @@ function effectText(key, value) {
   if (o.top && o.top !== 1) bits.push(`velocità max ${pct(o.top)}`);
   if (o.acc && o.acc !== 1) bits.push(`accelerazione ${pct(o.acc)}`);
   if (o.grip && o.grip !== 1) bits.push(`tenuta ${pct(o.grip)}`);
-  return bits.length ? bits.join(", ") : "solo estetica";
+  if (bits.length) return bits.join(", ");
+  return key === "rims" ? "solo estetica" : "base: nessun bonus né malus";
 }
 function perfBars(car, cfg, nowCfg) {
   const p = perfOf(car, cfg), r = perfOf(car, cleanConfig(car, null));
@@ -234,6 +235,7 @@ function perfBars(car, cfg, nowCfg) {
   ];
 }
 let gAction = null;
+let gCat = "engine";
 function renderGarage(rebuildModel) {
   const car = CARS[garageIdx];
   const locked = !carUnlocked(car, profile);
@@ -249,37 +251,71 @@ function renderGarage(rebuildModel) {
   lock.textContent = locked ? `Bloccata: ${unlockText(car)}.` : "";
   const st = $("gStats"); st.textContent = "";
   st.append(...perfBars(car, cfg, preview ? cfgFor(car) : null));
-  const parts = $("gParts"); parts.textContent = "";
+  // parts: one category at a time (tabs), each option a big button with its status and effect
   const canEdit = !locked && owned;
-  const optButton = (key, value, label, isSwatch) => {
-    const b = document.createElement("button");
-    const have = ownsPart(profile, car, key, value);
-    const price = priceOf(car, key, value);
-    b.className = (isSwatch ? "sw" : "opt") + (cfg[key] === value ? " on" : "") + (have ? "" : " shop");
-    if (isSwatch) { b.style.background = value; b.setAttribute("aria-label", `Colore${have ? "" : ", " + fmtC(price)}`); }
-    else {
-      b.textContent = label;
-      if (!have) { const pr = document.createElement("small"); pr.textContent = fmtC(price); b.appendChild(pr); }
-    }
-    b.disabled = !canEdit;
-    b.addEventListener("click", () => {
-      if (have) { preview = null; setPart(car, key, value); }
-      else { preview = { car: car.id, key, value, label: isSwatch ? "colore" : `${PARTS[key].label.toLowerCase()} ${label.toLowerCase()}` }; renderGarage(true); }
-    });
-    return b;
-  };
-  for (const key of PART_ORDER) {
-    const box = document.createElement("div"); box.className = "part";
-    const lab = document.createElement("small"); lab.textContent = PARTS[key].label;
-    const opts = document.createElement("div"); opts.className = "opts";
-    for (const o of PARTS[key].options) opts.appendChild(optButton(key, o.id, o.label, false));
-    box.append(lab, opts); parts.appendChild(box);
+  const cats = [...PART_ORDER, "color"];
+  if (!cats.includes(gCat)) gCat = "engine";
+  const tabs = $("gCats"); tabs.textContent = "";
+  for (const key of cats) {
+    const t = document.createElement("button");
+    t.className = "ptab" + (key === gCat ? " on" : "");
+    t.textContent = key === "color" ? "Colore" : PARTS[key].label;
+    t.setAttribute("role", "tab"); t.setAttribute("aria-selected", key === gCat ? "true" : "false");
+    t.addEventListener("click", () => { gCat = key; if (preview && preview.key !== key) preview = null; renderGarage(!!preview); t.scrollIntoView({ block: "nearest", inline: "center" }); });
+    tabs.appendChild(t);
   }
-  const cbox = document.createElement("div"); cbox.className = "part";
-  const clab = document.createElement("small"); clab.textContent = "Colore";
-  const sws = document.createElement("div"); sws.className = "swatches";
-  for (const c of COLORS) sws.appendChild(optButton("color", c, "", true));
-  cbox.append(clab, sws); parts.appendChild(cbox);
+  const parts = $("gParts"); parts.textContent = "";
+  const mounted = cfgFor(car);
+  const pick = (key, value, label) => {
+    const have = ownsPart(profile, car, key, value);
+    if (!canEdit) return;
+    if (have) {
+      preview = null;
+      if (mounted[key] !== value) { setPart(car, key, value); toastMenu(`Montato: ${key === "color" ? "colore" : PARTS[key].label.toLowerCase() + " " + label.toLowerCase()}`); }
+      else renderGarage(true);
+    } else { preview = { car: car.id, key, value, label: key === "color" ? "colore" : `${PARTS[key].label.toLowerCase()} ${label.toLowerCase()}`, short: key === "color" ? "colore" : label }; renderGarage(true); }
+  };
+  const status = (key, value) => {
+    const have = ownsPart(profile, car, key, value);
+    if (mounted[key] === value) return { cls: "mounted", text: "Montato" };
+    if (preview && preview.key === key && preview.value === value) return { cls: "trying", text: `In prova · ${fmtC(priceOf(car, key, value))}` };
+    if (have) return { cls: "mine", text: "Tuo · tocca per montare" };
+    return { cls: "shop", text: fmtC(priceOf(car, key, value)) };
+  };
+  if (gCat === "color") {
+    const sws = document.createElement("div"); sws.className = "swatches big";
+    for (const c of COLORS) {
+      const b = document.createElement("button");
+      const st = status("color", c);
+      b.className = "sw " + st.cls + (cfg.color === c ? " on" : "");
+      b.style.background = c; b.setAttribute("aria-label", `Colore: ${st.text}`); b.disabled = !canEdit;
+      b.addEventListener("click", () => pick("color", c, ""));
+      sws.appendChild(b);
+    }
+    const leg = document.createElement("p"); leg.className = "note small-note";
+    leg.textContent = `Colori con la M: da comprare (${fmtC(priceOf(car, "color", COLORS[1]))}). Gli altri sono tuoi: tocca per montarli.`;
+    parts.append(sws, leg);
+  } else {
+    const grid = document.createElement("div"); grid.className = "popts";
+    for (const o of PARTS[gCat].options) {
+      const st = status(gCat, o.id);
+      const b = document.createElement("button");
+      b.className = "popt " + st.cls + (cfg[gCat] === o.id ? " on" : "");
+      b.disabled = !canEdit;
+      const n = document.createElement("b"); n.textContent = o.label;
+      const s1 = document.createElement("small"); s1.className = "st"; s1.textContent = st.text;
+      const s2 = document.createElement("small"); s2.className = "fx"; s2.textContent = effectText(gCat, o.id);
+      b.append(n, s1, s2);
+      b.addEventListener("click", () => pick(gCat, o.id, o.label));
+      grid.appendChild(b);
+    }
+    parts.appendChild(grid);
+  }
+  if (!canEdit) {
+    const n = document.createElement("p"); n.className = "note small-note";
+    n.textContent = locked ? "Sblocca l'auto per cambiarle i pezzi." : "Compra l'auto per cambiarle i pezzi.";
+    parts.appendChild(n);
+  }
 
   const use = $("gUse"), msg = $("gMsg");
   const coins = profile.coins || 0;
@@ -291,14 +327,15 @@ function renderGarage(rebuildModel) {
     gAction = { item: "car", price }; use.disabled = coins < price;
   } else if (preview) {
     const price = priceOf(car, preview.key, preview.value);
-    use.textContent = `Compra ${preview.label} · ${fmtC(price)}`;
+    use.textContent = `Compra ${preview.short || preview.label} · ${fmtC(price)}`;
     gAction = { item: `${preview.key}:${preview.value}`, price, key: preview.key, value: preview.value }; use.disabled = coins < price;
   } else if (garage.sel === car.id) use.textContent = "In uso";
   else { use.textContent = "Usa questa auto"; use.disabled = false; gAction = { use: true }; }
   if (gAction && gAction.price != null && coins < gAction.price) msg.textContent = (preview ? `${effectText(preview.key, preview.value)}. ` : "") + `Hai ${fmtC(coins)}: ti mancano ${fmtC(gAction.price - coins)}.`;
-  else if (preview) msg.textContent = `Anteprima ${preview.label}: ${effectText(preview.key, preview.value)}.`;
+  else if (preview) msg.textContent = `In prova: ${preview.label}. Per annullare tocca il pezzo montato.`;
   else msg.textContent = "";
   msg.hidden = !msg.textContent;
+  msg.classList.toggle("pv", !!preview && !(gAction && gAction.price != null && coins < gAction.price));
 }
 function setPart(car, key, value) {
   const cfg = { ...cfgFor(car), [key]: value };
