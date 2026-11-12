@@ -112,11 +112,16 @@ export class Sound {
     }
     if (this.ctx.state === "suspended") this.ctx.resume();
   }
+  // voices on the radio: engines go quieter so people can hear each other
+  duck(on) {
+    this.ducked = on;
+    if (this.ctx && this.master && this.on) this.master.gain.setTargetAtTime(on ? 0.25 : 0.55, this.ctx.currentTime, 0.2);
+  }
   setOn(on) {
     this.on = on;
     try { localStorage.setItem("faro-sound", on ? "on" : "off"); } catch (_) {}
     if (!on) this.stopAll();
-    if (this.ctx) this.master.gain.setTargetAtTime(on ? 0.55 : 0, this.ctx.currentTime, 0.05);
+    if (this.ctx) this.master.gain.setTargetAtTime(on ? (this.ducked ? 0.25 : 0.55) : 0, this.ctx.currentTime, 0.05);
     if (on) this.unlock();
   }
   startRace(kind) {

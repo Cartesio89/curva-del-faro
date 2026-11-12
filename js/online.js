@@ -3,6 +3,7 @@
 import { openChannel } from "./net.js";
 import { CARS, CIRCUITS, PARTS, PART_ORDER, COLORS, defaultConfig, circuitById } from "./data.js";
 import { aiSpecs, circuitItems } from "./circuit.js";
+import { Radio } from "./voice.js";
 
 const $ = (id) => document.getElementById(id);
 const SEND_EVERY = 0.1;            // seconds between state messages (10 per second)
@@ -133,9 +134,13 @@ export function initOnline(ctx) {
     roomCh.on("result", (m) => onResult(m));
     roomCh.on("next", (m) => onNext(m));
     roomCh.on("exit", (m) => closed(`${m.by} ha chiuso la sfida.`));
+    // voice radio: everybody can switch it on; it links to the others who have it on
+    if (radio) radio.stop(true);
+    radio = new Radio({ send: (t, d) => roomCh && roomCh.send(t, d), on: (t, f) => roomCh.on(t, f), me: me(), token: ctx.token, onChange: renderRadio });
     roomCh.track({ name: me() });
     if (!(await roomCh.subscribe())) ctx.toast("Collegamento in tempo reale non riuscito: riprova tra poco.", "bad");
     roomCh.send("roster", {});
+    roomCh.send("radio", { n: me(), on: false, ask: 1 });
     showRoom();
   }
   async function refreshRoom() {
@@ -154,8 +159,38 @@ export function initOnline(ctx) {
     ctx.renderCtrl();
     renderRoom();
   }
+  // ------------------------------------------------------------- voice radio UI
+  let radio = null;
+  function renderRadio() {
+    const on = !!(radio && radio.on);
+    const b = $("radioBtn");
+    if (b) { b.textContent = on ? "Radio: accesa" : "Accendi la radio"; b.classList.toggle("on-air", on); }
+    const st = $("radioState");
+    if (st) {
+      const others = radio ? [...radio.wanted] : [];
+      const linked = radio ? radio.linked() : [];
+      st.textContent = !on ? (others.length ? `Radio accesa da: ${others.join(", ")}.` : "Nessuno ha la radio accesa.")
+        : linked.length ? `In radio con: ${linked.join(", ")}.` : others.length ? `Collego ${others.join(", ")}…` : "Aspetto che qualcun altro accenda la radio.";
+    }
+    const mic = $("micBtn");
+    mic.hidden = !on;
+    mic.textContent = radio && radio.muted ? "MIC off" : "MIC";
+    mic.classList.toggle("muted", !!(radio && radio.muted));
+    ctx.duck(on && radio.linked().length > 0);
+  }
+  $("radioBtn").addEventListener("click", async () => {
+    if (!radio) return;
+    if (radio.on) { radio.stop(); return; }
+    const r = await radio.start();
+    if (r === "denied") ctx.toast("Microfono non permesso: abilitalo nelle impostazioni del browser.", "bad");
+    else if (r === "unsupported") ctx.toast("Questo browser non supporta la radio.", "bad");
+  });
+  $("micBtn").addEventListener("click", () => { if (radio && radio.on) radio.setMuted(!radio.muted); });
+  setInterval(() => { if (radio && radio.on) renderRadio(); }, 2000);
+
   function renderRoom() {
     if (!room) return;
+    renderRadio();
     const c = circuitById(room.circuit), car = ctx.carById(room.car);
     $("roomTitle").textContent = `Sfida · ${c ? c.name : room.circuit}`;
     const parts = ctx.setupText(room.setup).replace(/^ · /, "");
@@ -393,6 +428,7 @@ export function initOnline(ctx) {
     closed(null);
   }
   function closed(msg) {
+    if (radio) { radio.stop(); radio = null; renderRadio(); }
     if (roomCh) { roomCh.close(); roomCh = null; }
     room = null; host = false; started = false; result = null; myFinish = null;
     $("oMp").hidden = true; $("again").hidden = false; $("toBox").textContent = "Box";

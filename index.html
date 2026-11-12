@@ -39,6 +39,7 @@
       </div>
       <div class="sub">
         <button class="chip chip-btn pause-btn" id="pauseBtn" aria-label="Pausa (tasto P)" title="Pausa (P)">P</button>
+        <button class="chip chip-btn mic-btn" id="micBtn" aria-label="Microfono radio: tocca per spegnere o accendere" hidden>MIC</button>
         <button class="chip chip-btn" id="fsChip" aria-label="Schermo intero" hidden>⛶</button>
         <span class="chip cp" id="cpChip">Traguardo tra <b id="cpLeft">0</b> m</span>
         <span class="chip cp" id="lapChip" hidden></span>
@@ -119,6 +120,10 @@
       <h3>In griglia</h3>
       <ul class="people" id="roomPlayers"></ul>
       <p class="note" id="roomAi"></p>
+      <div class="radio-row">
+        <button class="ghost" id="radioBtn">Accendi la radio</button>
+        <small class="note" id="radioState"></small>
+      </div>
       <div id="roomBox"></div>
       <div id="roomInviteBox">
         <h3>Invita chi è online</h3>

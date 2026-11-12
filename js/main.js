@@ -1037,7 +1037,8 @@ const online = initOnline({
   endRace: () => endRace(), endRaceKeepRoom: () => { endRace(); mode = "menu"; }, race: () => race,
   isRacing: () => !!race && (mode === "race" || mode === "paused" || mode === "pre"),
   fmtLap, fmtC, renderCtrl, ctrlBlock: () => $("ctrlBlock"), carById, setupText, renderBoard,
-  showCar: (car, cfg) => showroom.setCar(car, cleanConfig(car, cfg), false)
+  showCar: (car, cfg) => showroom.setCar(car, cleanConfig(car, cfg), false),
+  duck: (on) => sound.duck(on)
 });
 $("goChallenge").addEventListener("click", () => online.openLobbyRoom());
 // browsers allow sound only after a tap: any tap unlocks it (guests start races without tapping "Via")

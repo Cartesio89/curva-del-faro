@@ -324,3 +324,9 @@ button.small { padding: 6px 12px; font-size: 14px; min-height: 0; }
 .board small .when, .order small .when, ol small.when { color: var(--ink-dim); white-space: nowrap; }
 /* four leaderboard tabs: wrap onto two lines on narrow phones instead of being cut off */
 #boardTabs { flex-wrap: wrap; justify-content: center; overflow: visible; }
+
+/* Voice radio */
+.radio-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#radioBtn.on-air { border-color: #3ccf7e; color: #3ccf7e; }
+.mic-btn { font-weight: 800; min-width: 52px; min-height: 36px; background: rgba(60,207,126,0.25); border-color: #3ccf7e; }
+.mic-btn.muted { background: rgba(224,87,74,0.3); border-color: #e0574a; }
