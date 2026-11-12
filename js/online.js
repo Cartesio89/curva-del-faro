@@ -14,6 +14,7 @@ export function initOnline(ctx) {
   //        renderCtrl, ctrlBlock, carById, setupText, renderBoard, isRacing() }
   let lobby = null, online = [], room = null, roomCh = null, host = false, raceNo = 1;
   let pendingInvite = null, pollTimer = 0, sendAcc = 0, result = null, myFinish = null, hostWatch = 0, started = false;
+  let mySave = null, doneT = 0;   // mySave: { raceNo, promise } — my own result, saved the moment I cross the line
   const me = () => ctx.profile() && ctx.profile().name;
 
   // ------------------------------------------------------------- lobby: who is online
@@ -133,7 +134,7 @@ export function initOnline(ctx) {
     roomCh.on("st", (m) => onState(m));
     roomCh.on("result", (m) => onResult(m));
     roomCh.on("next", (m) => onNext(m));
-    roomCh.on("exit", (m) => closed(`${m.by} ha chiuso la sfida.`));
+    roomCh.on("exit", (m) => onExitMsg(m));
     // voice radio: everybody can switch it on; it links to the others who have it on
     if (radio) radio.stop(true);
     radio = new Radio({ send: (t, d) => roomCh && roomCh.send(t, d), on: (t, f) => roomCh.on(t, f), me: me(), token: ctx.token, onChange: renderRadio });
@@ -260,7 +261,7 @@ export function initOnline(ctx) {
   let loaded = new Set(), gridHumans = [], loadWait = 0, goSent = false, loadTimer = 0;
   function beginRace(m) {
     if (!room) return;
-    started = true; result = null; myFinish = null; sendAcc = 0; hostWatch = 0;
+    started = true; result = null; myFinish = null; sendAcc = 0; hostWatch = 0; doneT = 0; leaveBtn(false);
     raceNo = m.raceNo; room.circuit = m.circuit; room.car = m.car; room.setup = m.setup;
     loaded = new Set(); loadWait = 0; goSent = false;
     gridHumans = m.grid.filter((g) => g.kind === "human").map((g) => g.name);
@@ -310,14 +311,21 @@ export function initOnline(ctx) {
     const now = performance.now();
     if (host && !result) {
       // everybody home (or dropped out) -> final order
-      const lostOrDone = race.cars.every((c) => c.finished || (c.remote && c.human && (!c.seen || now - c.seen > LOST_AFTER) && race.t > 15));
+      // every real player home (or dropped out) -> final order. The AI cars do not hold it up:
+      // whoever is still running is ranked by how far it got.
+      const humansDone = race.cars.filter((c) => c.human).every((c) => c.finished || (c.remote && (!c.seen || now - c.seen > LOST_AFTER) && race.t > 15));
+      if (humansDone) doneT += dt; else doneT = 0;
       if (myFinish) hostWatch += dt;
-      if (race.state !== "countdown" && (lostOrDone || hostWatch > 120)) sendResult(race);
+      if (race.state !== "countdown" && (doneT > 2 || hostWatch > 120)) sendResult(race);
     }
     if (!host && race.t > 20 && !result) {
       // no news from the host (it drives the AI): the challenge is over
       const h = race.cars.find((c) => c.remote && c.name === room.host);
-      if (h && h.seen && now - h.seen > LOST_AFTER * 1.5) closed(`${room.host} si è scollegato: sfida finita.`);
+      if (h && h.seen && now - h.seen > LOST_AFTER * 1.5) {
+        // I'm already home: my result is saved; show the order as I see it instead of dropping everything
+        if (myFinish) onResult({ ...localOrder(race), hostGone: true });
+        else closed(`${room.host} si è scollegato: sfida finita.`);
+      }
     }
   }
   function onState(m) {
@@ -325,6 +333,12 @@ export function initOnline(ctx) {
     // the host only sends race states after the start: if the "go" got lost, this is the start
     if (race && race.mp && race.state === "waiting" && room && m.n === room.host && !host) race.go();
     if (race && race.mp) race.applyNet(m.rows || [], performance.now());
+  }
+  function localOrder(race) {
+    const rows = race.cars.map((c) => ({ name: c.name, human: !!c.human, time: c.finished ? Math.round(c.finishTime * 10) / 10 : null, best: c.best == null ? null : Math.round(c.best * 10) / 10, s: c.s }))
+      .sort((a, b) => (a.time == null) - (b.time == null) || (a.time ?? 0) - (b.time ?? 0) || b.s - a.s)
+      .map(({ s, ...r }) => r);
+    return { raceNo, order: rows };
   }
   function sendResult(race) {
     const rows = race.cars.map((c) => ({ name: c.name, human: !!c.human, time: c.finished ? Math.round(c.finishTime * 10) / 10 : null, best: c.best == null ? null : Math.round(c.best * 10) / 10, s: c.s }))
@@ -337,10 +351,43 @@ export function initOnline(ctx) {
   function onMyFinish(st) {
     myFinish = st;
     const h = $("hint"); h.className = "hint"; h.textContent = "Arrivato! Aspetta gli altri…"; h.hidden = false;
+    // wait 1.5 s so that a car that crossed the line just before me is known here too, then save
+    const r = ctx.race(), no = raceNo;
+    setTimeout(() => { if (raceNo === no) saveMine(r); }, 1500);
+    leaveBtn(true);
+  }
+  // My result goes to the server as soon as I cross the line: position = cars home before me + 1.
+  // It does not depend on the organiser's phone staying connected until the end.
+  function saveMine(race) {
+    if (!race || !race.player || !myFinish || !room || (mySave && mySave.raceNo === raceNo)) return mySave && mySave.promise;
+    const meCar = race.player, t = meCar.finishTime;
+    const ahead = race.cars.filter((c) => c !== meCar && c.finished && c.finishTime < t);
+    const position = Math.min(6, ahead.length + 1);
+    const humans = race.cars.filter((c) => c.human).length;
+    const realRank = Math.min(humans, ahead.filter((c) => c.human).length + 1);
+    const vmax = myFinish.maxKmh > 0 ? Math.round(myFinish.maxKmh * 10) / 10 : null;
+    const time = Math.round(t * 10) / 10, best = myFinish.best;
+    const promise = ctx.api.challengeResult(ctx.token(), room.id, raceNo, position, realRank, humans, time, best, vmax)
+      .then((r) => { if (r && r.profile) ctx.setProfile(r.profile, true); return { ...r, position }; })
+      .catch(() => ({ error: "network" }));
+    mySave = { raceNo, promise };
+    return promise;
+  }
+  // a visible way out while waiting at the finish line
+  function leaveBtn(on) {
+    let b = $("mpLeave");
+    if (!b && on) {
+      b = document.createElement("button"); b.id = "mpLeave"; b.className = "ghost mp-leave"; b.textContent = "Esci dalla sfida";
+      b.addEventListener("click", () => exit());
+      document.getElementById("game") ? document.getElementById("game").appendChild(b) : document.body.appendChild(b);
+    }
+    if (b) b.hidden = !on;
   }
   async function onResult(m) {
     if (result && result.raceNo === m.raceNo) return;
+    if (myFinish) saveMine(ctx.race());      // in case the finish came in the same frame as the result
     result = m;
+    leaveBtn(false);
     const order = m.order;
     const humans = order.filter((o) => o.human);
     const winner = humans[0] ? humans[0].name : null;
@@ -370,7 +417,7 @@ export function initOnline(ctx) {
     $("oMp").hidden = false;
     $("again").hidden = true;
     $("toBox").textContent = "Esci dalla sfida";
-    renderDecision(winner);
+    if (m.hostGone) renderGone(); else renderDecision(winner);
     ctx.show("scrOver");
     $("oBoardTitle").textContent = "Top 10 · Sfide";
     ctx.api.topChallenges().then((rows) => ctx.renderBoard($("oBoard"), rows, me(), "challenges"));
@@ -378,10 +425,9 @@ export function initOnline(ctx) {
     const save = $("oSave");
     if (!mine || mine.time == null || !myFinish) { save.textContent = "Non sei arrivato al traguardo: nessun premio."; $("oHit").textContent = ctx.fmtC(0); return; }
     save.textContent = "Salvo il risultato…";
-    const realRank = humans.findIndex((h) => h.name === me()) + 1;
-    const vmax = myFinish.maxKmh > 0 ? Math.round(myFinish.maxKmh * 10) / 10 : null;
-    const r = await ctx.api.challengeResult(ctx.token(), room.id, m.raceNo, myIdx + 1, realRank, humans.length, mine.time, myFinish.best, vmax);
-    if (r && r.profile) { ctx.setProfile(r.profile, true); save.textContent = `Salvato: +${ctx.fmtC(r.earned)}.`; $("oHit").textContent = ctx.fmtC(r.earned); }
+    const r = await ((mySave && mySave.raceNo === m.raceNo && mySave.promise) || Promise.resolve({ error: "network" }));
+    if (r && r.profile) { save.textContent = `Salvato in classifica Sfide: +${ctx.fmtC(r.earned)}.`; $("oHit").textContent = ctx.fmtC(r.earned); }
+    else if (r && r.error === "duplicate") save.textContent = "Risultato già salvato.";
     else save.textContent = ctx.ERRORS[r && r.error] || "Risultato non salvato.";
   }
   // the winner (first among the real players) decides: same circuit again, another circuit, or stop
@@ -423,6 +469,23 @@ export function initOnline(ctx) {
   }
 
   // ------------------------------------------------------------- leaving
+  function onExitMsg(m) {
+    if (!room) return;
+    const stay = (room.members || []).filter((x) => x.state === "joined" && x.name !== m.by);
+    if (m.by === room.host || stay.length < 2) { closed(`${m.by} ha chiuso la sfida.`); return; }
+    room.members = (room.members || []).map((x) => (x.name === m.by ? { ...x, state: "left" } : x));
+    ctx.toast(`${m.by} è uscito dalla sfida.`);
+    if (result) {   // the one who had to decide is gone: the next real player decides
+      const next = result.order.find((o) => o.human && room.members.some((x) => x.name === o.name && x.state === "joined"));
+      renderDecision(next ? next.name : null);
+    } else if (!started) renderRoom();
+  }
+  function renderGone() {
+    const box = $("oMp"); box.textContent = "";
+    const p = document.createElement("p"); p.className = "note";
+    p.textContent = `${room.host} si è scollegato: la sfida è finita. Il tuo risultato è salvato.`;
+    box.appendChild(p);
+  }
   async function exit() {
     if (!room) return;
     const id = room.id;
@@ -434,6 +497,7 @@ export function initOnline(ctx) {
     if (radio) { radio.stop(); radio = null; renderRadio(); }
     if (roomCh) { roomCh.close(); roomCh = null; }
     room = null; host = false; started = false; result = null; myFinish = null;
+    leaveBtn(false);
     $("oMp").hidden = true; $("again").hidden = false; $("toBox").textContent = "Box";
     setBusy(false);
     ctx.goHome();
@@ -446,6 +510,8 @@ export function initOnline(ctx) {
     onTake: (id) => { if (roomCh) roomCh.send("take", { id, raceNo }); },
     debug: () => ({ loaded: [...loaded], gridHumans, raceNo, host, goSent, loadWait }),
     inChallenge: () => !!room,
+    isHost: () => host,
+    othersStay: () => !!room && (room.members || []).filter((x) => x.state === "joined" && x.name !== me()).length >= 2,
     openLobbyRoom: async () => {          // "Sfida un amico" from home without picking anyone yet
       if (room) { showRoom(); return; }
       const pick = randomCarSetup();

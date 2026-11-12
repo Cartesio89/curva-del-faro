@@ -849,9 +849,13 @@ function pause() {
   if (mode !== "race") return;
   if (race && race.meta.mp) {   // an online race cannot be stopped: the menu opens over it
     mpMenu = true; clearInput();
-    $("pauseNote").hidden = false; $("pauseNote").textContent = "La gara online non si ferma. «Torna al box» chiude la sfida per tutti.";
+    $("pauseNote").hidden = false;
+    $("pauseNote").textContent = "La gara online non si ferma. " + (online.isHost() ? "Organizzi tu: se esci, la sfida finisce per tutti."
+      : online.othersStay() ? "Se esci, gli altri continuano senza di te." : "Se esci, la sfida finisce (resterebbe un solo giocatore).");
+    $("quit").textContent = "Esci dalla sfida";
     show("scrPause"); return;
   }
+  $("quit").textContent = "Torna al box";
   mode = "paused"; clearInput(); sound.pause(true);
   $("pauseNote").textContent = "Se esci ora la tappa conta come ritiro: 0 punti e tempo di penalità.";
   $("pauseNote").hidden = !(race && race.meta.champ && race.state !== "finished");
