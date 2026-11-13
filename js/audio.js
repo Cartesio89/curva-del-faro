@@ -57,6 +57,8 @@ class Voice {
     for (const o of [this.a, this.b, this.sub]) o.start();
   }
   set(rpm, load, vol, panX, pitch) {
+    // a bad number here must never stop the game loop
+    if (![rpm, load, vol, panX, pitch].every(Number.isFinite)) return;
     const t = this.ctx.currentTime, k = 0.05;
     const f = (rpm / 60) * (this.cyl / 2) * pitch * this.kind.pitch;   // firing frequency
     this.a.frequency.setTargetAtTime(f, t, k);

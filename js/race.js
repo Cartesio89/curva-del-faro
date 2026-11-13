@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { World } from "./world.js";
-import { stepCar, smoothSteer, resolveContact, GRIP_ARCADE } from "./physics.js";
+import { stepCar, smoothSteer, resolveContact, GRIP_ARCADE, oilSkid, OIL_TIME } from "./physics.js";
 import { buildCar, trafficTemplatesFor, disposeCar } from "./carmodel.js";
 import { CARS, defaultConfig, performance, ROAD_HALF, LANE_W, START_TIME, CP_FIRST, CP_GAP, START_S, cpBonus } from "./data.js";
 
@@ -100,7 +100,7 @@ export class Race {
     const top = p.topMs * (this.turbo > 0 ? 1.2 : 1);
     let steerTarget = 0;
     if (live) {
-      if (this.slip > 0) { this.slip -= dt; steerTarget = this.slipDir * 0.6; }
+      if (this.slip > 0) { this.slip -= dt; steerTarget = this.slipDir * 0.4; }
       else steerTarget = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     }
     if (live && !(this.slip > 0) && input.tilt != null) this.steerSm = (this.steerSm || 0) + (input.tilt - (this.steerSm || 0)) * Math.min(1, dt * 12);
@@ -114,6 +114,7 @@ export class Race {
       coast: this.state === "over" ? 4 : 1
     }, this.state === "ready" ? 0 : dt);
     if (this.state === "ready") { car.v = 0; st.ds = 0; }
+    if (live && this.slip > 0) oilSkid(car, this.slipDir, dt);
     this.v = Math.min(car.v, p.topMs * 1.25);
     this.x = clamp(car.x, -(ROAD_HALF + 20), ROAD_HALF + 20);
     if (Math.abs(car.x) > ROAD_HALF + 20) car.phi *= 0.5;
@@ -130,9 +131,9 @@ export class Race {
 
     if (live && this.v > (this.maxV || 0)) this.maxV = this.v;
     // off the edge where the ground is far below (the road runs over a gap, like a bridge): the car falls
-    if (live && Math.abs(this.x) > ROAD_HALF + 1.1 && this.world.dropAt(this.s, this.x) > 2.5) {
+    if (live && Math.abs(this.x) > this.world.edgeAt(this.s) && this.world.dropAt(this.s, this.x) > 2.5) {
       this.fall = { t: 0, vy: 0, y0: this.world.sample(this.s, 0).y }; this.fallY = 0;
-      this.hooks.onToast("Volo!", "bad");
+      this.hooks.onToast(this.track.sea ? "In mare!" : "Volo!", "bad");
       return;
     }
 
@@ -211,7 +212,7 @@ export class Race {
     else if (type === "clock") { this.timeLeft += 3; h.onToast("+3 s", "good"); }
     else if (type === "turbo") { this.turbo = 4; h.onToast("Turbo!", "good"); }
     else if (type === "shield") { this.shield++; h.onToast(this.shield > 1 ? `Scudi: ${this.shield}` : "Scudo attivo", "good"); }
-    else if (type === "oil") { this.slip = 1.2; this.slipDir = Math.random() < 0.5 ? -1 : 1; h.onToast("Olio!", "bad"); }
+    else if (type === "oil") { this.slip = OIL_TIME; this.slipDir = Math.random() < 0.5 ? -1 : 1; h.onToast("Olio!", "bad"); }
     else if (type === "cones") {
       if (this.shield > 0) { this.shield--; this.shake = 0.15; h.onToast(this.shield ? `Cantiere evitato (scudi: ${this.shield})` : "Scudo: cantiere evitato", "good"); }
       else { this.v *= 0.45; this.shake = 0.35; h.onToast("Cantiere!", "bad"); }

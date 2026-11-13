@@ -186,7 +186,9 @@ export function initOnline(ctx) {
     if (r === "denied") ctx.toast("Microfono non permesso: abilitalo nelle impostazioni del browser.", "bad");
     else if (r === "unsupported") ctx.toast("Questo browser non supporta la radio.", "bad");
   });
-  $("micBtn").addEventListener("click", () => { if (radio && radio.on) radio.setMuted(!radio.muted); });
+  { let t = 0; const f = () => { if (radio && radio.on) radio.setMuted(!radio.muted); };
+    $("micBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); t = performance.now(); f(); });
+    $("micBtn").addEventListener("click", () => { if (performance.now() - t > 700) f(); }); }
   setInterval(() => { if (radio && radio.on) renderRadio(); }, 2000);
 
   function renderRoom() {

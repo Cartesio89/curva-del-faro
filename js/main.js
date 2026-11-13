@@ -468,7 +468,7 @@ async function openBoard(kind, filter = "", car = "") {
     : kind === "races"
     ? [["", "Generale"], ...CIRCUITS.map((c) => [c.id, c.name])]
     : kind === "speed"
-    ? [["", "Ovunque"], ...TRACKS.map((t) => [t.id, t.name]), ...CIRCUITS.map((c) => [c.id, c.name])]
+    ? [["", "Ovunque"], ...TRACKS.map((t) => [t.id, t.name]), ...CIRCUITS.map((c) => [c.id, TRACKS.some((t) => t.name === c.name) ? `${c.name} (circuito)` : c.name])]
     : [["", "Tutte le piste"], ...TRACKS.map((t) => [t.id, t.name])];
   for (const [id, label] of opts) {
     const b = document.createElement("button");
@@ -865,7 +865,14 @@ function resume() {
   if (mpMenu) { mpMenu = false; show(null); return; }
   if (mode !== "paused") return; show(null); mode = "race"; sound.pause(false);
 }
-$("pauseBtn").addEventListener("click", pause);
+// In-race buttons react to the finger touching them, not to "click": phone browsers do not send a click
+// while another finger is on the screen (holding GAS), so a tap on P while driving was lost.
+function fastTap(btn, fn, onUp) {
+  let t = 0;
+  btn.addEventListener(onUp ? "pointerup" : "pointerdown", (e) => { if (e.pointerType === "mouse" && e.button !== 0) return; e.preventDefault(); t = performance.now(); fn(); });
+  btn.addEventListener("click", () => { if (performance.now() - t > 700) fn(); });   // keyboard / mouse fallback
+}
+fastTap($("pauseBtn"), pause);
 $("resume").addEventListener("click", resume);
 $("quit").addEventListener("click", async () => {
   if (mpMenu || (race && race.meta.mp)) { mpMenu = false; await online.exit(); return; }
@@ -912,6 +919,7 @@ function updateCorner(h) {
   put(chip, `${c.dir > 0 ? "→" : "←"} ${c.dir > 0 ? "Destra" : "Sinistra"} ${SEV_LABEL[c.sev]} · ${d}`);
   const cls = "chip corner sev" + c.sev; if (chip._cls !== cls) { chip._cls = cls; chip.className = cls; }
 }
+const luma = (c) => /^#[0-9a-f]{6}$/i.test(c) ? parseInt(c.slice(1, 3), 16) * 0.3 + parseInt(c.slice(3, 5), 16) * 0.59 + parseInt(c.slice(5, 7), 16) * 0.11 : 255;
 function drawMinimap() {
   const cv = $("minimap");
   const noMap = !race || !race.minimap;
@@ -938,7 +946,12 @@ function drawMinimap() {
   for (const c of m.cars.filter((c) => !c.isPlayer)) {
     const [x, z] = P(c.x, c.z);
     g.fillStyle = c.color; g.strokeStyle = "#1d1d1f"; g.lineWidth = 2.5;
-    g.beginPath(); g.arc(x, z, 7, 0, Math.PI * 2); g.fill(); g.stroke();
+    if (c.tag) {   // another real player: bigger dot with the initial
+      g.beginPath(); g.arc(x, z, 11, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = luma(c.color) > 150 ? "#1d1d1f" : "#ffffff";
+      g.font = `900 ${c.tag.length > 1 ? 10 : 13}px system-ui, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText(c.tag, x, z + 0.5);
+    } else { g.beginPath(); g.arc(x, z, 7, 0, Math.PI * 2); g.fill(); g.stroke(); }
   }
   const me = m.cars.find((c) => c.isPlayer);
   if (me) { const [x, z] = P(me.x, me.z); g.fillStyle = "#ffb23e"; g.strokeStyle = "#fff"; g.lineWidth = 3; g.beginPath(); g.arc(x, z, 10, 0, Math.PI * 2); g.fill(); g.stroke(); }
@@ -948,6 +961,22 @@ function drawMinimap() {
 function put(node, v) { v = String(v); if (node._v !== v) { node._v = v; node.textContent = v; } }
 function hide(node, h) { if (node._h !== h) { node._h = h; node.hidden = h; } }
 function flag(node, cls, on) { const k = "_c" + cls; if (node[k] !== on) { node[k] = on; node.classList.toggle(cls, on); } }
+// intermediate times: red = how far behind the car ahead, green = how far ahead of the car behind
+const fmtGap = (g) => {
+  const a = Math.abs(g), sign = g >= 0 ? "+" : "−";
+  if (a >= 60) { const m = Math.floor(a / 60); return `${sign}${m}:${(a - m * 60).toFixed(1).padStart(4, "0").replace(".", ",")}`; }
+  return sign + a.toFixed(2).replace(".", ",");
+};
+function renderSplit(sp) {
+  const box = $("splitBox");
+  hide(box, !sp);
+  if (!sp) return;
+  put($("splitLbl"), `${sp.label} · ${sp.pos}°`);
+  const a = $("splitA"), b = $("splitB");
+  hide(a, !sp.ahead); hide(b, !sp.behind);
+  if (sp.ahead) put(a, `${fmtGap(sp.ahead.gap)}  da ${sp.ahead.name}`);
+  if (sp.behind) put(b, sp.behind.est ? `su ${sp.behind.name} …` : `${fmtGap(-sp.behind.gap)}  su ${sp.behind.name}`);
+}
 function updateHud() {
   const h = race.hud();
   updateCorner(h);
@@ -964,8 +993,10 @@ function updateHud() {
     const nb = $("bNos");
     hide(nb, !h.items);
     if (h.items) { put($("nosN"), h.nos); flag(nb, "empty", !(h.nos > 0) && !h.nosOn); flag(nb, "boosting", !!h.nosOn); }
+    renderSplit(h.split);
     return;
   }
+  renderSplit(null);
   put($("emDist"), "m"); put($("emTime"), "s");
   put(el.coins, fmtC(h.coins));
   put(el.spd, h.kmh); put(el.dst, h.dist); put(el.tim, h.time.toFixed(1)); put(el.cp, h.toCp);
@@ -1001,8 +1032,9 @@ function bindPad(btn, key) {
   const off = () => { if (race) race.rearView = false; rb.classList.remove("on"); };
   rb.addEventListener("pointerdown", on); rb.addEventListener("pointerup", off); rb.addEventListener("pointercancel", off); rb.addEventListener("lostpointercapture", off);
   rb.addEventListener("contextmenu", (e) => e.preventDefault());
-  addEventListener("keydown", (e) => { if (e.code === "KeyC" && race && !(e.target && e.target.tagName === "INPUT")) race.rearView = true; });
-  addEventListener("keyup", (e) => { if (e.code === "KeyC" && race) race.rearView = false; });
+  // R (or C) held = look behind
+  addEventListener("keydown", (e) => { if ((e.code === "KeyR" || e.code === "KeyC") && race && !(e.target && e.target.tagName === "INPUT")) { race.rearView = true; rb.classList.add("on"); } });
+  addEventListener("keyup", (e) => { if ((e.code === "KeyR" || e.code === "KeyC") && race) { race.rearView = false; rb.classList.remove("on"); } });
 }
 bindPad($("bG"), "gas"); bindPad($("bB"), "brake"); bindPad($("bL"), "left"); bindPad($("bR"), "right");
 // NOS fires once per press (the race clears the request after using it)
@@ -1085,7 +1117,7 @@ function renderFs() {
   $("fsBtn").textContent = fsOn() ? "Esci da schermo intero" : "Schermo intero (orizzontale)";
 }
 $("fsBtn").addEventListener("click", toggleFull);
-$("fsChip").addEventListener("click", toggleFull);
+fastTap($("fsChip"), toggleFull, true);   // fullscreen needs the finger lifted (browser rule)
 document.addEventListener("fullscreenchange", renderFs);
 document.addEventListener("webkitfullscreenchange", renderFs);
 renderFs(); renderCtrl();
@@ -1111,7 +1143,12 @@ addEventListener("pointerdown", () => sound.unlock(), { once: true });
 
 // ------------------------------------------------------------------ loop
 let last = performance.now(), acc = 0;
+// the loop always schedules the next frame, even if something in this one throws (a frozen game is worse)
 function frame(now) {
+  try { step(now); } catch (e) { console.error(e); }
+  requestAnimationFrame(frame);
+}
+function step(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (race && (mode === "race" || mode === "over")) {
     showroom.active = false;
@@ -1123,7 +1160,7 @@ function frame(now) {
     for (let i = 0; i < n; i++) race.update(h, inp);
     input.nos = false;
     if (race.mp) online.tick(race, dt);
-    if (!race) { requestAnimationFrame(frame); return; }   // the online results just closed the race
+    if (!race) return;   // the online results just closed the race
     if (mode === "race" && race.audioState) {
       sound.update(engineVoices(race.audioState(input)));
       const hits = race.contacts ?? race.crashes ?? 0;
@@ -1139,7 +1176,6 @@ function frame(now) {
     showroom.active = true;
     showroom.render(dt);
   }
-  requestAnimationFrame(frame);
 }
 
 async function boot() {

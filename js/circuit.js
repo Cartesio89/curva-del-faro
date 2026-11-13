@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { CircuitWorld } from "./world.js";
 import { buildCar, disposeCar } from "./carmodel.js";
-import { stepCar, smoothSteer, maxYaw, resolveContact, GRIP_ARCADE } from "./physics.js";
+import { stepCar, smoothSteer, maxYaw, resolveContact, GRIP_ARCADE, oilSkid, OIL_TIME } from "./physics.js";
 import { CARS, COLORS, CIRCUITS, AI_NAMES, PARTS, PART_ORDER, defaultConfig, performance, ROAD_HALF } from "./data.js";
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -20,10 +20,12 @@ export function aiSpecs(circuit, car, cfg, aiNames, count = 5) {
   const share = (k) => pStock0[k] * (1 + 0.6 * (pAct[k] / pStock0[k] - 1));
   const pStock = { ...pStock0, topMs: share("topMs"), a0: share("a0"), grip: share("grip"), topKmh: share("topKmh") };
   const ci = Math.max(0, CIRCUITS.indexOf(circuit));
-  const level = [0.97, 0.99, 1.01, 1.03, 1.05][ci];
+  const LEVEL = [0.97, 0.99, 1.01, 1.03, 1.05, 1.06];
+  const level = LEVEL[Math.min(ci, LEVEL.length - 1)];
   // skill = share of the grip limit the AI dares to use (1 = perfect driver). Calibrated on real laps:
   // a good human with a tuned car is around 0.65-0.70. Each circuit asks a bit more.
-  const skill0 = [0.58, 0.58, 0.7, 0.64, 0.72][ci];
+  const SKILL = [0.58, 0.58, 0.7, 0.64, 0.72, 0.7];   // Curva del Faro: very tight corners, no barriers
+  const skill0 = SKILL[Math.min(ci, SKILL.length - 1)];
   const pool = Array.isArray(aiNames) && aiNames.length >= count ? aiNames.slice() : AI_NAMES.slice();
   const names = pool.sort(() => Math.random() - 0.5);
   const out = [];
@@ -61,6 +63,23 @@ export function circuitItems(count = 18) {
 }
 
 // A lap race on a closed circuit against 5 AI drivers.
+// badge with a player's initial: always on top (seen through other cars), same size on screen near or far
+function nameBadge(text, color) {
+  const cv = document.createElement("canvas"); cv.width = cv.height = 128;
+  const g = cv.getContext("2d");
+  g.fillStyle = color; g.strokeStyle = "#1d1d1f"; g.lineWidth = 10;
+  g.beginPath(); g.arc(64, 58, 48, 0, Math.PI * 2); g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(46, 100); g.lineTo(64, 124); g.lineTo(82, 100); g.closePath(); g.fillStyle = "#1d1d1f"; g.fill();
+  const light = parseInt(color.slice(1, 3), 16) * 0.3 + parseInt(color.slice(3, 5), 16) * 0.59 + parseInt(color.slice(5, 7), 16) * 0.11 > 150;
+  g.fillStyle = light ? "#1d1d1f" : "#ffffff";
+  g.font = `900 ${text.length > 1 ? 46 : 62}px system-ui, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(text, 64, 61);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, sizeAttenuation: false }));
+  sp.scale.set(0.055, 0.055, 1); sp.renderOrder = 10; sp.center.set(0.5, 0);
+  return sp;
+}
+
 export class CircuitRace {
   constructor(renderer, track, circuit, car, cfg, hooks, opts = {}) {
     this.renderer = renderer;
@@ -118,6 +137,20 @@ export class CircuitRace {
       this.cars.push(c);
       if (isMe) this.player = c;
     });
+    // online: the other real players get a badge with their initial above the car (and on the map)
+    if (this.mp) {
+      const humans = this.cars.filter((c) => c.human);
+      for (const c of humans) {
+        const first = (c.name || "?").trim().charAt(0).toUpperCase();
+        const clash = humans.some((o) => o !== c && (o.name || "").trim().charAt(0).toUpperCase() === first);
+        c.tag = clash ? (c.name || "?").trim().slice(0, 2).replace(/^./, (x) => x.toUpperCase()) : first;
+        if (c.isPlayer) continue;
+        const sp = nameBadge(c.tag, c.obj.userData.color || "#ffb23e");
+        sp.position.set(0, 2.3, 0);
+        c.obj.add(sp);
+        c.badge = sp;
+      }
+    }
 
     // bonus/malus on the track (online challenges, if the host wants them): same items for everybody.
     // Turbo pickups are stored as NOS charges and fired with the NOS button; shields stack, one per car or roadworks.
@@ -140,7 +173,8 @@ export class CircuitRace {
     const row = Math.floor(slot / 2);
     return Object.assign(c, {
       s: -7 - row * 9, x: slot % 2 ? 2.4 : -2.4, v: 0, latV: 0, yaw: 0, phi: 0,
-      lap: -1, lapStart: 0, lastLap: null, best: null, finished: false, finishTime: null
+      lap: -1, lapStart: 0, lastLap: null, best: null, finished: false, finishTime: null,
+      marks: [], nextMark: 1     // split times: mark m is at m * L/3 (every 3rd mark = finish line)
     });
   }
 
@@ -163,11 +197,13 @@ export class CircuitRace {
     const boost = this.nosT > 0;
     if (this.nosT > 0) this.nosT = Math.max(0, this.nosT - dt);
     let target = null;
-    if (this.slip > 0) { this.slip -= dt; target = this.slipDir * 0.6; }     // oil: the car slides on its own
+    const oiled = this.slip > 0;
+    if (oiled) { this.slip -= dt; target = this.slipDir * 0.4; }     // oil: the car slides on its own
     if (target == null && input.tilt != null) c.steerSm = (c.steerSm || 0) + (input.tilt - (c.steerSm || 0)) * Math.min(1, dt * 12);
     else c.steerSm = smoothSteer(c.steerSm || 0, target ?? (input.right ? 1 : 0) - (input.left ? 1 : 0), dt);
     const st = stepCar(c, k, c.steerSm, { gas: input.gas, brake: input.brake, G: p.grip * tr.grip * GRIP_ARCADE * (this.slip > 0 ? 0.6 : 1),
       top: p.topMs * this.draft(c) * (boost ? 1.2 : 1), a0: p.a0 * (boost ? 1.6 : 1), offroad: tr.offroad }, dt);
+    if (oiled) oilSkid(c, this.slipDir, dt);
     this.pickups(c);
     if (this.state === "run" && c.v > (c.maxV || 0)) c.maxV = c.v;
     this.barrier(c, dt);
@@ -199,7 +235,7 @@ export class CircuitRace {
     const h = this.hooks, c = this.player;
     if (type === "turbo") { this.nos++; h.onToast(this.nos > 1 ? `NOS: ${this.nos}` : "NOS preso: premi NOS", "good"); }
     else if (type === "shield") { this.shield++; h.onToast(this.shield > 1 ? `Scudi: ${this.shield}` : "Scudo attivo", "good"); }
-    else if (type === "oil") { this.slip = 1.2; this.slipDir = Math.random() < 0.5 ? -1 : 1; h.onToast("Olio!", "bad"); }
+    else if (type === "oil") { this.slip = OIL_TIME; this.slipDir = Math.random() < 0.5 ? -1 : 1; h.onToast("Olio!", "bad"); }
     else if (type === "cones") {
       if (this.shield > 0) { this.shield--; this.shake = 0.15; h.onToast(this.shield ? `Cantiere evitato (scudi: ${this.shield})` : "Scudo: cantiere evitato", "good"); }
       else { c.v *= 0.45; this.shake = 0.35; h.onToast("Cantiere!", "bad"); }
@@ -208,6 +244,15 @@ export class CircuitRace {
 
   // gravel and tyre wall beyond the kerbs: heavy slowdown, the car cannot leave the circuit
   barrier(c, dt = 1 / 60) {
+    if (this.track.sea) {
+      if (Math.abs(c.x) > ROAD_HALF + 2) c.v *= Math.pow(0.985, dt * 60);
+      if (!c.fall && !c.remote && Math.abs(c.x) > this.world.edgeAt(c.s) && this.world.dropAt(c.s, c.x) > 2.5) {
+        c.fall = { t: 0, vy: 0 }; c.fallY = 0;
+        if (c.isPlayer) { this.shake = 0.3; this.hooks.onToast("In mare!", "bad"); }
+      }
+      c.x = clamp(c.x, -120, 120);
+      return;
+    }
     const lim = ROAD_HALF + 5;
     if (Math.abs(c.x) > ROAD_HALF + 2) c.v *= Math.pow(0.985, dt * 60);
     if (Math.abs(c.x) > lim) { c.x = Math.sign(c.x) * lim; c.phi *= -0.3; c.v *= 0.8; if (c.isPlayer && !this.wallCool) { this.shake = 0.4; this.wallCool = 1; this.hooks.onToast("Barriera!", "bad"); } }
@@ -337,9 +382,10 @@ export class CircuitRace {
     }
     this.t += dt;
     for (const c of this.cars) {
-      const ds = c.remote ? this.followNet(c, dt) : c.isPlayer && this.state === "run" ? this.drivePlayer(c, dt, input) : this.driveAI(c, dt);
+      const ds = c.remote ? this.followNet(c, dt) : c.fall ? this.updateFall(c, dt) : c.isPlayer && this.state === "run" ? this.drivePlayer(c, dt, input) : this.driveAI(c, dt);
       c.yaw = -c.phi;
       c.s += ds;
+      this.crossMarks(c);
       const lap = Math.floor(c.s / this.L);
       if (lap > c.lap) {
         if (lap >= 1 && !c.finished) {
@@ -375,6 +421,7 @@ export class CircuitRace {
         // same momentum-based solver for everyone (s is unwrapped progress, so use the wrapped gap).
         // A car moved by the network is moved only by its owner: here it pushes but is not pushed.
         if (a.remote && b.remote) continue;
+        if (a.fall || b.fall || a.ghostT > this.t || b.ghostT > this.t) continue;   // in the water / just respawned
         // a shield lets the player pass through one car (then it is used up)
         const other = a.isPlayer ? b : b.isPlayer ? a : null;
         if (other) {
@@ -400,6 +447,62 @@ export class CircuitRace {
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt);
   }
 
+  // fell into the sea: about a second in the air, then back on the road centre, standing still
+  updateFall(c, dt) {
+    const f = c.fall;
+    f.t += dt; f.vy += 9.8 * dt; c.fallY -= f.vy * dt;
+    const ds = c.v * dt * 0.7;
+    c.x += Math.sign(c.x) * c.v * dt * 0.12; c.v *= Math.pow(0.5, dt);
+    if (f.t > 1.3) {
+      c.fall = null; c.fallY = 0;
+      c.x = 0; c.v = 0; c.phi = 0; c.latV = 0; c.steerSm = 0; c.ghostT = this.t + 2;
+      if (c.isPlayer) { this.slip = 0; this.hooks.onToast("Riparti da centro pista", "bad"); }
+    }
+    return ds;
+  }
+
+  // ---- intermediates: 2 per lap + the finish line
+  crossMarks(c) {
+    const SL = this.L / 3;
+    while (c.s >= c.nextMark * SL) {
+      const m = c.nextMark++;
+      const t = this.t - (c.s - m * SL) / Math.max(1, c.v);   // the moment it was exactly on the line
+      c.marks[m] = t;
+      if (m > this.laps * 3) continue;                       // laps after the finish (online, still rolling)
+      if (c.isPlayer) this.playerSplit(m, t);
+      else if (this.split && this.split.m === m && this.split.watch === c) {
+        this.split.behind = { name: c.name, gap: t - this.split.myT, est: false };
+        this.split.at = Math.max(this.split.at, this.t - 2);   // keep it on screen a little longer
+      }
+    }
+  }
+  playerSplit(m, t) {
+    const order = this.order();
+    const i = order.indexOf(this.player);
+    const ahead = order[i - 1], behind = order[i + 1];
+    const lapN = m / 3;
+    const label = m % 3 === 1 ? "Intermedio 1" : m % 3 === 2 ? "Intermedio 2" : lapN >= this.laps ? "Arrivo" : `Traguardo · giro ${lapN}`;
+    const sp = { m, label, at: this.t, myT: t, pos: i + 1, ahead: null, behind: null, watch: null };
+    if (ahead && ahead.marks[m] != null) sp.ahead = { name: ahead.name, gap: t - ahead.marks[m] };
+    if (behind) {
+      if (behind.marks[m] != null) sp.behind = { name: behind.name, gap: behind.marks[m] - t, est: false };   // lapped etc.
+      else {   // not there yet: estimate from distance and speed, replaced by the real time when it crosses
+        const d = m * (this.L / 3) - behind.s;
+        // it will cover that gap at about the speed I just had there (a bit less if it is slower now)
+        sp.behind = { name: behind.name, gap: d / Math.max(5, 0.7 * this.player.v + 0.3 * behind.v), est: true };
+        sp.watch = behind;
+      }
+    }
+    this.split = sp;
+  }
+  order() {
+    return this.cars.slice().sort((a, b) => {
+      if (a.finished && b.finished) return a.finishTime - b.finishTime;
+      if (a.finished) return -1;
+      if (b.finished) return 1;
+      return b.s - a.s;
+    });
+  }
   position(c = this.player) {
     const order = this.cars.slice().sort((a, b) => {
       if (a.finished && b.finished) return a.finishTime - b.finishTime;
@@ -448,13 +551,14 @@ export class CircuitRace {
   netState(all) {
     const r2 = (n) => Math.round(n * 100) / 100;
     return this.cars.filter((c) => !c.remote && (all || c.isPlayer))
-      .map((c) => [c.slot, r2(c.s), r2(c.x), r2(c.v), Math.round(c.phi * 1000) / 1000, c.finished ? r2(c.finishTime) : -1, c.best == null ? -1 : r2(c.best)]);
+      .map((c) => [c.slot, r2(c.s), r2(c.x), r2(c.v), Math.round(c.phi * 1000) / 1000, c.finished ? r2(c.finishTime) : -1, c.best == null ? -1 : r2(c.best), c.fall ? 1 : 0]);
   }
   applyNet(rows, now) {
     for (const r of rows) {
       const c = this.cars[r[0]];
       if (!c || !c.remote) continue;
       c.net = { s: r[1], x: r[2], v: r[3], phi: r[4], at: now };
+      c.netFall = r[7] === 1;
       c.seen = now;
       if (r[6] >= 0) c.best = r[6];
       if (r[5] >= 0 && !c.finished) { c.finished = true; c.finishTime = r[5]; this.finishedOrder.push(c); }
@@ -484,7 +588,7 @@ export class CircuitRace {
     const w = this.world, tmp = {};
     for (const c of this.cars) {
       w.sample(c.s, c.x, tmp);
-      c.obj.position.set(tmp.x, 0, tmp.z);
+      c.obj.position.set(tmp.x, tmp.y + (c.fallY || 0) + (c.remote && c.netFall ? -6 : 0), tmp.z);
       let roll = -c.latV * 0.006;
       if (c.isPlayer && this.shake > 0) { c.obj.position.x += rnd(-0.06, 0.06); roll += rnd(-0.03, 0.03); }
       c.obj.rotation.set(0, tmp.heading + c.yaw, roll, "YXZ");
@@ -528,7 +632,7 @@ export class CircuitRace {
       for (let i = 0; i < w.px.length; i += 4) this.mapPath.push([w.px[i], w.pz[i]]);
     }
     const tmp = {};
-    const cars = this.cars.map((c) => { w.sample(c.s, c.x, tmp); return { x: tmp.x, z: tmp.z, isPlayer: c.isPlayer, color: c.obj.userData.color || "#ffffff" }; });
+    const cars = this.cars.map((c) => { w.sample(c.s, c.x, tmp); return { x: tmp.x, z: tmp.z, isPlayer: c.isPlayer, color: c.obj.userData.color || "#ffffff", tag: c.isPlayer ? null : c.tag || null }; });
     return { path: this.mapPath, cars };
   }
 
@@ -551,7 +655,8 @@ export class CircuitRace {
       lap: clamp(p.lap + 1, 1, this.laps), laps: this.laps,
       lapTime: this.state === "countdown" || p.lap < 0 ? 0 : this.t - p.lapStart, best: p.best,
       off: this.state === "run" && Math.abs(p.x) > ROAD_HALF + 0.6, state: this.state,
-      items: this.items.length > 0, nos: this.nos, nosOn: this.nosT > 0, shield: this.shield, slip: this.slip > 0
+      items: this.items.length > 0, nos: this.nos, nosOn: this.nosT > 0, shield: this.shield, slip: this.slip > 0,
+      split: this.split && this.t - this.split.at < 5 ? this.split : null
     };
   }
 

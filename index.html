@@ -49,10 +49,11 @@
         <span class="chip shield" id="cShield" hidden>Scudo</span>
         <span class="chip bad" id="cOil" hidden>Olio</span>
         <span class="chip bad" id="cOff" hidden>Fuori strada</span>
+        <div class="split-row"><div class="split-box" id="splitBox" hidden aria-live="polite"><small id="splitLbl"></small><b class="sp-a" id="splitA"></b><b class="sp-b" id="splitB"></b></div></div>
       </div>
       <div class="hint" id="hint">Tieni premuto GAS</div>
       <canvas class="minimap" id="minimap" width="220" height="220" hidden aria-label="Mappa del circuito"></canvas>
-      <button class="btn rear-btn" id="rearBtn" aria-label="Retroview: tieni premuto per guardare dietro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V10"/><path d="M12 9.5a1.5 1.5 0 0 1 3 0V11"/><path d="M15 10.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a5 5 0 0 1-4-2l-2.6-3.4a1.5 1.5 0 0 1 2.3-1.9L9 15.5"/><path d="M4.5 4.5l1.4 1.4M3.5 9h2M8 1.5v2"/></svg><span>retroview</span></button>
+      <button class="btn rear-btn" id="rearBtn" aria-label="Retroview: tieni premuto per guardare dietro (tasto R)" title="Retroview (R)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V10"/><path d="M12 9.5a1.5 1.5 0 0 1 3 0V11"/><path d="M15 10.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a5 5 0 0 1-4-2l-2.6-3.4a1.5 1.5 0 0 1 2.3-1.9L9 15.5"/><path d="M4.5 4.5l1.4 1.4M3.5 9h2M8 1.5v2"/></svg><span>retroview</span></button>
       <div class="controls">
         <div class="pad">
           <button class="btn btn-steer" id="bL" aria-label="Sterza a sinistra"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
@@ -66,7 +67,7 @@
           </div>
         </div>
       </div>
-      <div class="keys">↑ gas · ↓ freno · ← → sterza · C guarda dietro · P pausa</div>
+      <div class="keys">↑ gas · ↓ freno · ← → sterza · R guarda dietro · P pausa · N nos (sfide)</div>
     </div>
 
     <!-- ===== Login ===== -->
@@ -195,6 +196,7 @@
         </div>
         <p class="note" id="ctrlNote" hidden></p>
       </div>
+      <p class="note keys-note">Tastiera: frecce o WASD per guidare · P pausa · R (tieni premuto) specchietto · N o Spazio NOS nelle sfide</p>
       <div class="actions">
         <button class="go big-go" id="preGo">Via!</button>
         <button class="ghost" id="fsBtn" hidden>Schermo intero</button>

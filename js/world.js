@@ -4,6 +4,9 @@ import { ROAD_HALF, LANE_W, CP_FIRST, CP_GAP, START_S } from "./data.js";
 export const SEG_L = 5;            // metres per centreline step
 const CHUNK = 20;                   // segments per mesh chunk (100 m: smaller slices, smoother frames)
 const KERB = 0.7, VERGE = 26, OUTER = 320;
+// sea tracks (Curva del Faro): bridges have no railing, only a paved margin as wide as a car beyond the kerb
+export const BRIDGE_M = 2.0;
+export const BRIDGE_EDGE = ROAD_HALF + KERB + BRIDGE_M;
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
@@ -160,8 +163,34 @@ function sceneryKit(track) {
     { geo: new THREE.BoxGeometry(0.1, 1.5, 0.1), color: "#6a4a2a", m: M(0, 0.75, 4.5) },
     { geo: new THREE.BoxGeometry(0.1, 1.5, 0.1), color: "#6a4a2a", m: M(0, 0.75, -4.5) }
   ]);
-  kit.rock = merged([{ geo: new THREE.DodecahedronGeometry(2.2, 0), color: "#b5653a", m: M(0, 1.2, 0, 1.3, 0.9, 1) },
-    { geo: new THREE.DodecahedronGeometry(1.3, 0), color: "#a3582f", m: M(1.8, 0.7, 0.6) }]);
+  const rockA = track.sea ? "#8d8a84" : "#b5653a", rockB = track.sea ? "#76736e" : "#a3582f";
+  kit.rock = merged([{ geo: new THREE.DodecahedronGeometry(2.2, 0), color: rockA, m: M(0, 1.2, 0, 1.3, 0.9, 1) },
+    { geo: new THREE.DodecahedronGeometry(1.3, 0), color: rockB, m: M(1.8, 0.7, 0.6) }]);
+  if (track.sea) {
+    // lighthouse: stone base, red and white tower, gallery, glowing lantern, red roof
+    const parts = [
+      { geo: new THREE.CylinderGeometry(3.6, 4.0, 1.6, 14), color: "#8d8a84", m: M(0, 0.8) },
+      { geo: new THREE.CylinderGeometry(3.2, 3.2, 0.25, 14), color: "#5d5b57", m: M(0, 1.7) }
+    ];
+    const H = 22, bands = 6;
+    for (let i = 0; i < bands; i++) {
+      const y0 = 1.8 + (H / bands) * i, y1 = y0 + H / bands;
+      const r0 = 2.5 - 0.8 * (i / bands), r1 = 2.5 - 0.8 * ((i + 1) / bands);
+      parts.push({ geo: new THREE.CylinderGeometry(r1, r0, H / bands, 14), color: i % 2 ? "#f4f1e8" : "#c8352e", m: M(0, (y0 + y1) / 2) });
+    }
+    parts.push({ geo: new THREE.CylinderGeometry(2.6, 2.6, 0.35, 14), color: "#2b2b30", m: M(0, H + 2.0) });
+    parts.push({ geo: new THREE.CylinderGeometry(1.4, 1.4, 0.3, 12), color: "#2b2b30", m: M(0, H + 4.7) });
+    parts.push({ geo: new THREE.ConeGeometry(1.7, 2.0, 12), color: "#a8302a", m: M(0, H + 5.85) });
+    kit.lighthouse = merged(parts);
+    kit.lanternGeo = new THREE.CylinderGeometry(1.25, 1.25, 2.4, 12); kit.lanternGeo.translate(0, H + 3.4, 0);
+    kit.lanternMat = new THREE.MeshStandardMaterial({ color: 0xfff1c4, emissive: 0xffd77a, emissiveIntensity: 2.2, roughness: 0.3 });
+    // the beam: a long, faint cone of light that sweeps round
+    kit.beamGeo = new THREE.ConeGeometry(7, 140, 16, 1, true); kit.beamGeo.translate(0, -70, 0); kit.beamGeo.rotateZ(Math.PI / 2);
+    kit.beamMat = new THREE.MeshBasicMaterial({ color: 0xfff0b8, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+    kit.deckMat = new THREE.MeshStandardMaterial({ color: 0xb9b3a7, roughness: 0.85, side: THREE.DoubleSide });
+    kit.pierGeo = new THREE.BoxGeometry(1, 1, 1); kit.pierGeo.translate(0, -0.5, 0);
+    kit.pierMat = new THREE.MeshStandardMaterial({ color: 0x8f897d, roughness: 0.9 });
+  }
   kit.cactus = merged([
     { geo: new THREE.CylinderGeometry(0.28, 0.32, 4, 7), color: "#4f7d3a", m: M(0, 2) },
     { geo: new THREE.CylinderGeometry(0.18, 0.18, 1.6, 6), color: "#4f7d3a", m: M(0.6, 2.4) },
@@ -301,7 +330,44 @@ export class World {
     this.cpIndex = 0;
     this.itemGap = 220;
     this.lastWarnS = -999;
+    this.isl = [];            // sea tracks: island half-width beyond the road at each segment (0 = bridge over the water)
+    this.lights = [];         // sea tracks: lighthouses {s, side, d}
+    this.beams = [];
+    if (track.sea) {
+      this.water = new THREE.Mesh(new THREE.CircleGeometry(5000, 48),
+        new THREE.MeshStandardMaterial({ color: track.water || "#1d5f78", roughness: 0.32, metalness: 0.15 }));
+      this.water.rotation.x = -Math.PI / 2;
+      this.water.position.y = track.seaY;
+      this.water.receiveShadow = true;
+      this.root.add(this.water);
+    }
     this.init();
+  }
+  // ---- sea tracks: islands and bridges
+  islAt(s) {
+    if (!this.track.sea) return 999;
+    const SL = this.segL || SEG_L, n = this.isl.length;
+    if (!n) return 60;
+    if (this.loopL) s = ((s % this.loopL) + this.loopL) % this.loopL;
+    const i = clamp(Math.floor(s / SL), 0, n - 1), j = this.loopL ? (i + 1) % n : Math.min(n - 1, i + 1);
+    const f = clamp(s / SL - i, 0, 1), a = this.isl[i], b = this.isl[j];
+    if (a <= 0.5 || b <= 0.5) return f < 0.5 ? a : b;    // a bridge starts at a clean line
+    return a + (b - a) * f;
+  }
+  onBridge(s) { return this.track.sea && this.islAt(s) <= 0.5; }
+  // lateral distance from the centre where the car is no longer supported (beyond it: it falls if the drop is big)
+  edgeAt(s) { return this.onBridge(s) ? BRIDGE_EDGE : ROAD_HALF + 1.1; }
+  seaTerrain(s, x) {
+    const p = this.sample(s, 0, this._ts || (this._ts = {}));
+    const sea = this.track.seaY, w = this.islAt(s);
+    if (w <= 0.5) return sea - 6;                          // open water under the bridge
+    const a = Math.abs(x) - (ROAD_HALF + KERB);
+    if (a <= 0) return p.y;
+    const flat = Math.max(6, w * 0.55);
+    const land = p.y - 0.02 + (a > 8 ? (Math.sin(s * 0.05 + x * 0.21) + Math.sin(s * 0.017 - x * 0.09)) * 0.35 * Math.min(1, (a - 8) / 10) : 0);
+    if (a <= flat) return land;
+    const t = smooth(clamp((a - flat) / Math.max(4, w - flat), 0, 1));
+    return land + (sea - 3 - land) * t;                    // beach / rocks down into the sea
   }
 
   init() { this.ensure(1500); }
@@ -318,6 +384,7 @@ export class World {
     this.pz.push(this.pz[i] + Math.cos(this.th[i]) * SEG_L);
     this.py.push(y);
     this.lastY = y;
+    if (this.track.sea) this.isl.push(this.curIsl || 0);
   }
   addRoad(enter, hold, leave, k, rise) {
     const y0 = this.lastY, n = enter + hold + leave;
@@ -340,16 +407,19 @@ export class World {
     let best = null;
     const old = this.oldGrid(this.k.length);
     for (let t = 0; t < 24; t++) {
-      const n0 = this.k.length, y0 = this.lastY, sg = this.signs.length;
+      const n0 = this.k.length, y0 = this.lastY, sg = this.signs.length, lg = this.lights.length, kind = this.pieceKind;
       this.addPieceRaw(t < 8 ? null : t < 16 ? (t % 2 ? 1 : -1) : 0);
       const gap = this.clearOfItself(n0, old);
       if (gap === Infinity) return;
       // keep the attempt that stays farthest from the old road, in case none is fully clear
-      if (!best || gap > best.gap) best = { gap, k: this.k.slice(n0), y: this.py.slice(n0 + 1), signs: this.signs.slice(sg) };
+      if (!best || gap > best.gap) best = { gap, k: this.k.slice(n0), y: this.py.slice(n0 + 1), signs: this.signs.slice(sg), isl: this.isl.slice(n0), lights: this.lights.slice(lg), kind: this.pieceKind };
       this.k.length = n0;
       this.th.length = this.px.length = this.pz.length = this.py.length = n0 + 1;
-      this.lastY = y0; this.signs.length = sg;
-      if (t === 23) { best.k.forEach((k, i) => this.pushSeg(k, best.y[i])); this.signs.push(...best.signs); if (best.y.length) this.lastY = best.y[best.y.length - 1]; }
+      this.lastY = y0; this.signs.length = sg; this.isl.length = n0; this.lights.length = lg; this.pieceKind = kind;
+      if (t === 23) {
+        best.k.forEach((k, i) => this.pushSeg(k, best.y[i])); this.signs.push(...best.signs); if (best.y.length) this.lastY = best.y[best.y.length - 1];
+        this.isl.length = n0; this.isl.push(...best.isl); this.lights.push(...best.lights); this.pieceKind = best.kind;
+      }
     }
   }
   // smallest distance (m) between the new piece and road laid before it, Infinity if over 60 m
@@ -381,6 +451,7 @@ export class World {
   }
   // force: null = random piece, 0 = straight, ±1 = a bend that direction
   addPieceRaw(force) {
+    if (this.track.sea) return this.addSeaPiece(force);
     const s0 = this.length;
     const d = this.difficulty(s0);
     const [kmin, kmax] = this.track.curve;
@@ -405,6 +476,55 @@ export class World {
       this.addRoad(en, ho, le, k * dir, 0);
       this.addRoad(en, ho, le, -k * dir, this.randomRise(400));
     }
+  }
+  // Curva del Faro: islands with tight corners joined by long bridges (straight or gently bent, arched)
+  addSeaPiece(force) {
+    const s0 = this.length, n0 = this.k.length;
+    const segs = (m) => Math.max(1, Math.round(m / SEG_L));
+    const d = this.difficulty(s0);
+    const [kmin, kmax] = this.track.curve;
+    const markIsland = (from, W) => {
+      const n = this.k.length - from;
+      for (let i = from; i < this.k.length; i++) this.isl[i] = 16 + (W - 16) * Math.sin(Math.PI * (i - from + 0.5) / n);
+    };
+    this.curIsl = 0;
+    if (s0 < 200) { this.addRoad(0, 44, 0, 0, 0); markIsland(n0, 80); this.pieceKind = "island"; return; }
+    if (this.pieceKind !== "bridge") {
+      const len = rnd(260, 640);
+      const n = segs(len), h = Math.floor(n / 2);
+      const bend = force === 0 ? 0 : force ? force : Math.random() < 0.35 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+      const k = bend ? bend * rnd(1 / 900, 1 / 380) : 0;
+      const rise = 4 + len / 140;                       // arched: highest in the middle
+      this.addRoad(3, h - 3, 0, k, rise);
+      this.addRoad(0, n - h - 3, 3, k, -rise);
+      this.lastY = 0; this.py[this.py.length - 1] = 0;
+      for (let i = n0; i < this.k.length; i++) this.isl[i] = 0;
+      this.pieceKind = "bridge";
+      return;
+    }
+    // island: a run-up, one tight bend (or a tight S), a run-out
+    this.addRoad(0, segs(rnd(35, 60)), 0, 0, 0);
+    const dir = force && force !== 0 ? force : Math.random() < 0.5 ? -1 : 1;
+    const k = rnd(kmin + (kmax - kmin) * (0.35 + 0.4 * d), kmax);
+    const sBend = force === 0 ? false : Math.random() < 0.4;
+    const bendAt = this.length;
+    if (!sBend) {
+      const ang = rnd(1.3, 2.7);                          // 75°..155°
+      const arc = ang / k, en = segs(Math.min(30, arc * 0.3)), le = en, ho = Math.max(1, segs(arc) - en);
+      this.addRoad(en, ho, le, k * dir, 0);
+    } else {
+      const ang = rnd(0.8, 1.4), arc = ang / k, en = segs(Math.min(25, arc * 0.3)), ho = Math.max(1, segs(arc) - en);
+      this.addRoad(en, ho, en, k * dir, 0);
+      this.addRoad(0, segs(rnd(10, 30)), 0, 0, 0);
+      this.addRoad(en, ho, en, -k * dir, 0);
+    }
+    const bendEnd = this.length;
+    for (let s = bendAt + 10; s < bendEnd - 10; s += 22) this.signs.push({ s, x: -dir * (ROAD_HALF + 2.0), kind: "chevron", dir });
+    this.addRoad(0, segs(rnd(35, 60)), 0, 0, 0);
+    markIsland(n0, rnd(60, 95));
+    // the lighthouse stands on the outside of the bend, where the island is widest
+    this.lights.push({ s: (bendAt + bendEnd) / 2, side: -dir, d: rnd(16, 24) });
+    this.pieceKind = "island";
   }
   placeItems(fromS, toS) {
     while (this.nextItemS === undefined || this.nextItemS < toS) {
@@ -512,6 +632,7 @@ export class World {
     return out;
   }
   terrainY(s, x) {
+    if (this.track.sea) return this.seaTerrain(s, x);
     const p = this.sample(s, 0);
     const a = Math.abs(x);
     if (a <= ROAD_HALF + VERGE) return p.y;
@@ -523,6 +644,7 @@ export class World {
   // A wide floor well below every visible stretch of road: wherever the terrain strips leave a gap
   // (inside the tightest bends) you see ground in the distance, never the sky through the earth.
   underlay(s) {
+    if (this.track.sea) return;
     if (!this.under) {
       this.under = new THREE.Mesh(new THREE.CircleGeometry(4000, 40), new THREE.MeshStandardMaterial({ color: this.track.ground, roughness: 1 }));
       this.under.rotation.x = -Math.PI / 2;
@@ -615,6 +737,8 @@ export class World {
     if (this.corners && this.corners.length > 200) this.corners = this.corners.filter((c) => c.end > s - 300);
   }
   followCamera(cam) {
+    if (this.water) { this.water.position.x = cam.position.x; this.water.position.z = cam.position.z; }
+    if (this.beams.length) { const t = globalThis.performance.now() / 1000; for (const b of this.beams) b.rotation.y = t * 0.9 + b.userData.ph; }
     this.sky.position.copy(cam.position);
     this.skyline.position.set(cam.position.x, cam.position.y + 40, cam.position.z);
   }
@@ -671,7 +795,7 @@ export class World {
 
   ribbon(s0, s1, offsets, uFn, vScale, yFn, colorFn, xFn) {
     // rows along s, columns across offsets
-    const rows = Math.round((s1 - s0) / SEG_L) + 1;
+    const rows = Math.max(2, Math.round((s1 - s0) / SEG_L) + 1);   // at least 2 rows, even for a thin stripe
     const cols = offsets.length;
     const pos = new Float32Array(rows * cols * 3), uv = new Float32Array(rows * cols * 2);
     const col = colorFn ? new Float32Array(rows * cols * 3) : null;
@@ -701,6 +825,41 @@ export class World {
     return g;
   }
 
+  // bridges over the sea: a slab as wide as the road plus one car on each side, no railing, piers into the water
+  buildBridges(s0, s1, grp, owned) {
+    const SL = this.segL || SEG_L, k = this.kit, E = BRIDGE_EDGE, sea = this.track.seaY;
+    const runs = [];
+    let a = null;
+    const steps = Math.ceil((s1 - s0) / SL - 1e-6);
+    for (let i = 0; i <= steps; i++) {
+      const s = Math.min(s0 + i * SL, s1 - 0.01);
+      const b = this.onBridge(s);
+      if (b && a === null) a = s;
+      if (!b && a !== null) { runs.push([Math.max(s0, a - SL), Math.min(s1, s + SL * 0.5)]); a = null; }
+    }
+    if (a !== null) runs.push([Math.max(s0, a - SL), s1]);      // the bridge goes on into the next block
+    const piers = [];
+    const tmp = {};
+    for (const [sa, sb] of runs) {
+      if (sb - sa < 1) continue;
+      const strip = (offs, yFn) => { const g = this.ribbon(sa, sb, offs, (ci) => ci, 6, yFn); const m = new THREE.Mesh(g, k.deckMat); m.receiveShadow = true; grp.add(m); owned.push(g); };
+      strip([E, ROAD_HALF + KERB], (s, x, y) => y + 0.01);                     // paved margins, flush with the kerb
+      strip([-ROAD_HALF - KERB, -E], (s, x, y) => y + 0.01);
+      strip([E, E - 0.001], (s, x, y) => (x >= E ? y + 0.01 : y - 1.4));         // side faces
+      strip([-E + 0.001, -E], (s, x, y) => (x <= -E ? y + 0.01 : y - 1.4));
+      strip([E, -E], (s, x, y) => y - 1.4);                                     // underside
+      for (let s = Math.ceil(sa / 48) * 48; s < sb; s += 48) {
+        this.sample(s, 0, tmp);
+        const h = tmp.y - 1.4 - (sea - 2);
+        if (h > 0.5) piers.push(M(tmp.x, tmp.y - 1.4, tmp.z, E * 1.3, h, 2.4, tmp.heading));
+      }
+    }
+    if (piers.length) {
+      const im = new THREE.InstancedMesh(k.pierGeo, k.pierMat, piers.length);
+      piers.forEach((m, i) => im.setMatrixAt(i, m)); im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; im.castShadow = true;
+      grp.add(im);
+    }
+  }
   buildChunk(c) {
     const g = this.buildChunkGen(c);
     let r;
@@ -722,6 +881,7 @@ export class World {
       const kerb = new THREE.Mesh(this.ribbon(s0, s1, offs, (ci) => ci, 4, (s, x, y) => y + 0.015), this.kerbMat);
       kerb.receiveShadow = true; grp.add(kerb); owned.push(kerb.geometry);
     }
+    if (tr.sea) this.buildBridges(s0, s1, grp, owned);
     yield;
     const base = new THREE.Color(tr.ground), verge = new THREE.Color(tr.verge), tmpC = new THREE.Color();
     const colorFn = (s, x) => {
@@ -755,7 +915,7 @@ export class World {
       const raw = this.groundRaw || [ROAD_HALF + KERB, ROAD_HALF + 4, ROAD_HALF + 12, ROAD_HALF + VERGE,
         ...Array.from({ length: 13 }, (_, i) => ROAD_HALF + 40 + i * 12), ...Array.from({ length: 7 }, (_, i) => 220 + i * 16.7)];
       const offs = side > 0 ? raw.slice().reverse() : raw.map((v) => -v);
-      const gm = new THREE.Mesh(this.ribbon(s0, s1, offs, () => 0, 10, yFn, colorFn, this.loopL ? null : xFold), this.groundMat);
+      const gm = new THREE.Mesh(this.ribbon(s0, s1, offs, () => 0, 10, yFn, colorFn, this.loopL && !tr.sea ? null : xFold), this.groundMat);
       gm.receiveShadow = true; grp.add(gm); owned.push(gm.geometry);
       yield;
     }
@@ -778,6 +938,7 @@ export class World {
     };
     const lists = {};
     const push = (k, m) => {
+      if (tr.sea && m.elements[13] < tr.seaY + 0.6) return;     // would stand in the sea (bridges, beaches)
       if (this.blocked(m.elements[12], m.elements[14], k)) return;
       const margin = k === "building" ? ROAD_HALF + 12 : k === "post" || k === "lamp" || k === "lampHead" ? 0 : ROAD_HALF + 3.5;
       if (margin && this.onOtherRoad(grid, m.elements[12], m.elements[14], m.userData, margin)) return;
@@ -833,6 +994,25 @@ export class World {
       if (board) { pole.scale.y = 1.4; pole.position.y = p.y + 1.1; }
       grp.add(sign, pole);
     }
+    // lighthouses (sea tracks)
+    for (const lh of this.lights) {
+      if (lh.s < s0 || lh.s >= s1) continue;
+      const x = lh.side * (ROAD_HALF + lh.d);
+      const p = this.sample(lh.s, x);
+      const y = this.groundY(lh.s, x, grid);
+      if (y < tr.seaY + 0.6) continue;
+      if (this.loopL ? this.blocked(p.x, p.z, "tower") : this.onOtherRoad(grid, p.x, p.z, lh.s, ROAD_HALF + 6)) continue;
+      const g = new THREE.Group();
+      const tower = new THREE.Mesh(k.lighthouse, k.vc); tower.castShadow = true;
+      const lamp = new THREE.Mesh(k.lanternGeo, k.lanternMat);
+      const beam = new THREE.Mesh(k.beamGeo, k.beamMat); beam.position.y = 22 + 3.4; beam.userData.ph = lh.s * 0.37;
+      const beam2 = beam.clone(); beam2.userData.ph = beam.userData.ph + Math.PI;
+      g.add(tower, lamp, beam, beam2);
+      g.position.set(p.x, y - 0.3, p.z);
+      grp.add(g);
+      this.beams.push(beam, beam2);
+      (grp.userData.beams || (grp.userData.beams = [])).push(beam, beam2);
+    }
     // checkpoints
     for (let kk = this.cpAround(s0) - 1; kk <= this.cpAround(s1) + 1; kk++) {
       if (kk < 0) continue;
@@ -856,11 +1036,26 @@ export class World {
       grp.add(stripe); owned.push(stripe.geometry);
     }
 
+    // intermediates (closed circuits): yellow line across the road + "INT 1/2" boards on both sides
+    (this.splits || []).forEach((ss, idx) => {
+      if (ss < s0 || ss >= s1) return;
+      const stripe = new THREE.Mesh(this.ribbon(ss - 0.35, ss + 0.35, [ROAD_HALF, -ROAD_HALF], (ci) => ci, 1, (s, x, y) => y + 0.025), splitLineMat(k));
+      grp.add(stripe); owned.push(stripe.geometry);
+      for (const side of [-1, 1]) {
+        const p = this.sample(ss, side * (ROAD_HALF + 1.8));
+        const sign = new THREE.Mesh(k.signGeo, splitSignMat(k, idx + 1));
+        sign.position.set(p.x, p.y + 1.9, p.z); sign.rotation.y = p.heading + Math.PI;
+        const pole = new THREE.Mesh(k.poleGeo, k.poleMat); pole.position.set(p.x, p.y + 0.8, p.z);
+        grp.add(sign, pole);
+      }
+    });
+
     this.root.add(grp);
     return { grp, owned };
   }
   disposeChunk(obj) {
     this.root.remove(obj.grp);
+    if (obj.grp.userData.beams) { const gone = new Set(obj.grp.userData.beams); this.beams = this.beams.filter((b) => !gone.has(b)); }
     for (const g of obj.owned) g.dispose();
     obj.grp.traverse((m) => { if (m.isInstancedMesh) m.dispose(); });
   }
@@ -892,6 +1087,7 @@ export class CircuitWorld extends World {
     const P = curve.getSpacedPoints(n);          // n+1 points, last == first
     this.loopL = L;
     this.segL = L / n;
+    this.splits = [L / 3, (2 * L) / 3];   // intermediate timing lines
     this.px = []; this.pz = []; this.py = []; this.th = []; this.k = [];
     for (let i = 0; i <= n; i++) { this.px.push(P[i].x); this.pz.push(P[i].z); this.py.push(0); }
     let prev = null;
@@ -903,6 +1099,7 @@ export class CircuitWorld extends World {
     }
     for (let i = 0; i < n; i++) this.k.push(-(this.th[i + 1] - this.th[i]) / this.segL);
     this.groundRaw = [ROAD_HALF + KERB, ROAD_HALF + 4, ROAD_HALF + 14];
+    if (this.track.sea) this.seaLayout(n);
     // chevrons on the outside of tight corners
     for (let i = 0; i < n; i += 6) {
       const k = this.k[i];
@@ -914,12 +1111,61 @@ export class CircuitWorld extends World {
     let cx = 0, cz = 0;
     for (const p of P) { cx += p.x; cz += p.z; }
     cx /= P.length; cz /= P.length;
-    const ground = new THREE.Mesh(new THREE.CircleGeometry(3000, 48), new THREE.MeshStandardMaterial({ color: this.track.ground, roughness: 1 }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(cx, -0.07, cz);
-    ground.receiveShadow = true;
-    this.root.add(ground);
+    if (!this.track.sea) {   // over the sea the water plane is the floor
+      const ground = new THREE.Mesh(new THREE.CircleGeometry(3000, 48), new THREE.MeshStandardMaterial({ color: this.track.ground, roughness: 1 }));
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.set(cx, -0.07, cz);
+      ground.receiveShadow = true;
+      this.root.add(ground);
+    }
     this.built = false;
+  }
+  // Closed sea circuit: every long, fast stretch becomes a bridge (arched), the corners are islands with a lighthouse.
+  seaLayout(n) {
+    const SL = this.segL;
+    const fast = (i) => Math.abs(this.k[((i % n) + n) % n]) < 1 / 120;
+    const bridge = new Array(n).fill(false);
+    // runs of fast segments (the lap is a loop: start from a corner)
+    let start = 0; while (start < n && fast(start)) start++;
+    let i = 0;
+    while (i < n) {
+      const a = (start + i) % n;
+      if (!fast(a)) { i++; continue; }
+      let len = 0; while (i + len < n && fast((start + i + len) % n)) len++;
+      if (len * SL >= 120) for (let j = 6; j < len - 6; j++) bridge[(start + i + j) % n] = true;
+      i += len;
+    }
+    // the start/finish area stays on land
+    for (let j = -14; j <= 14; j++) bridge[(j + n) % n] = false;
+    // island width: grows with the distance from the nearest bridge
+    const dist = new Array(n).fill(Infinity);
+    for (let pass = 0; pass < 2; pass++) for (let j = 0; j < 2 * n; j++) {
+      const a = j % n, b = (j - 1 + n) % n;
+      dist[a] = bridge[a] ? 0 : Math.min(dist[a], dist[b] + 1);
+    }
+    for (let pass = 0; pass < 2; pass++) for (let j = 2 * n; j >= 0; j--) {
+      const a = j % n, b = (j + 1) % n;
+      dist[a] = bridge[a] ? 0 : Math.min(dist[a], dist[b] + 1);
+    }
+    this.isl = Array.from({ length: n }, (_, j) => (bridge[j] ? 0 : Math.min(95, 16 + dist[j] * SL * 0.55)));
+    // arched bridges
+    for (let j = 0; j < n; ) {
+      if (!bridge[j]) { j++; continue; }
+      let len = 0; while (j + len < n && bridge[j + len]) len++;
+      const A = Math.min(7, 2 + (len * SL) / 90);
+      for (let m = 0; m < len; m++) this.py[j + m] = A * Math.sin(Math.PI * (m + 0.5) / len);
+      j += len;
+    }
+    this.py[n] = this.py[0];
+    // one lighthouse per island, on the outside of its tightest corner
+    for (let j = 0; j < n; ) {
+      if (bridge[j]) { j++; continue; }
+      let len = 0; while (j + len < n && !bridge[j + len]) len++;
+      let best = j; for (let m = j; m < j + len; m++) if (Math.abs(this.k[m]) > Math.abs(this.k[best])) best = m;
+      if (len * SL > 80 && Math.abs(this.k[best]) > 1 / 200) this.lights.push({ s: best * SL, side: -Math.sign(this.k[best]), d: 18 });
+      j += len;
+    }
+    this.groundRaw = [ROAD_HALF + KERB, ROAD_HALF + 4, ROAD_HALF + 10, ROAD_HALF + 18, ROAD_HALF + 28, ROAD_HALF + 40, ROAD_HALF + 55, ROAD_HALF + 75, ROAD_HALF + 100];
   }
   get length() { return this.loopL; }
 
@@ -970,7 +1216,7 @@ export class CircuitWorld extends World {
   }
   ensure() {}
   placeItems() {}
-  terrainY() { return 0; }
+  terrainY(s, x) { return this.track.sea ? this.seaTerrain(s, x) : 0; }
   cpS(k) { return k === 0 ? 1 : 1e12; }
   cpAround() { return 0; }
   blocked(x, z, kind) {
@@ -985,6 +1231,23 @@ export class CircuitWorld extends World {
     for (let c = 0; c < chunks; c++) this.chunks.set(c, this.buildChunk(c));
     this.built = true;
   }
+}
+
+function splitLineMat(kit) {
+  return kit.splitLine || (kit.splitLine = new THREE.MeshStandardMaterial({ color: 0xf2c14e, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -2 }));
+}
+function splitSignMat(kit, n) {
+  kit.splitSign = kit.splitSign || {};
+  if (kit.splitSign[n]) return kit.splitSign[n];
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const g = c.getContext("2d");
+  g.fillStyle = "#f2c14e"; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = "#1d1d1f"; g.fillRect(8, 8, 112, 112);
+  g.fillStyle = "#f2c14e"; g.textAlign = "center"; g.textBaseline = "middle";
+  g.font = "bold 30px Arial Black, Impact, sans-serif"; g.fillText("INT", 64, 40);
+  g.font = "bold 58px Arial Black, Impact, sans-serif"; g.fillText(String(n), 64, 86);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return (kit.splitSign[n] = kit.signMat(t));
 }
 
 // approach board: distance, arrow toward the corner, colour = severity (green fast, amber medium, red tight)

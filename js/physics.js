@@ -36,6 +36,14 @@ export function stepCar(c, k, steer, opt, dt) {
   return { ds: c.v * Math.cos(c.phi) * dt, yaw };
 }
 
+// Oil: the tyres lose grip. The car yaws by itself at a rate that does not depend on speed (on a long
+// straight at 300 km/h it still turns ~20 degrees), and scrubs speed while sliding. Same for everyone.
+export const OIL_TIME = 1.2;
+export function oilSkid(c, dir, dt) {
+  c.phi = Math.max(-1.2, Math.min(1.2, c.phi + dir * 0.3 * dt));
+  c.v *= Math.pow(0.88, dt);
+}
+
 // Turns digital buttons into a progressive steering value (about 0.35 s to full lock, faster back to centre).
 export function smoothSteer(current, target, dt) {
   const rate = target === 0 || Math.sign(target) !== Math.sign(current) ? 6 : 3;

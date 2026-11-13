@@ -134,7 +134,12 @@ export const TRACKS = [
     sky: ["#0b1026", "#1d2350", "#3b2c5a"], fog: "#241f3e", fogNear: 50, fogFar: 700, sun: "#9fb2ff", sunI: 0.7, hemi: ["#6c78c8", "#1a1a24"], hemiI: 0.9,
     ground: "#2c2d33", verge: "#3a3b42", road: "#3c3c42", kerb: ["#d9d9d9", "#3a3b42"], night: true,
     curve: [0.002, 0.009], hills: 8, traffic: 1.6, grip: 0.95, offroad: 0.5, cpExtra: 1,
-    scenery: ["building", "lamp"], skyline: "city" }
+    scenery: ["building", "lamp"], skyline: "city" },
+  { id: "isole", name: "Curva del Faro", desc: "Ponti senza bordi tra isole e fari: curve strette, rettilinei lunghi, si cade in mare.", unlock: { track: "citta", cp: 3 },
+    sky: ["#27466e", "#e7a97f", "#f6dcb4"], fog: "#d2c0b0", fogNear: 110, fogFar: 1000, sun: "#ffe2bc", sunI: 2.3, hemi: ["#ffeedd", "#2f6278"], hemiI: 1.15,
+    ground: "#b8a877", verge: "#7c9852", road: "#55545a", kerb: ["#f3efe4", "#c8352e"], night: false,
+    curve: [0.012, 0.036], hills: 0, traffic: 0.85, grip: 1, offroad: 0.5, cpExtra: 5,
+    scenery: ["rock", "cypress", "post"], skyline: "sea", sea: true, seaY: -5, water: "#1f6380" }
 ];
 export const trackById = (id) => TRACKS.find((t) => t.id === id) || TRACKS[0];
 
@@ -198,7 +203,9 @@ export const CIRCUITS = [
   { id: "mesa", name: "Mesa", theme: "canyon", laps: 2, mult: 1.75, desc: "Rettilinei lunghissimi e tornanti.",
     pts: [[0,0],[650,0],[780,70],[770,200],[640,240],[580,320],[630,420],[520,490],[200,470],[120,380],[-60,420],[-230,360],[-210,230],[-120,170],[-160,70]] },
   { id: "notte", name: "Notturno", theme: "citta", laps: 3, mult: 2, desc: "Cittadino a curve secche, di notte.",
-    pts: [[0,0],[280,0],[310,30],[310,160],[340,190],[480,190],[510,220],[510,400],[480,430],[330,430],[300,400],[300,330],[270,300],[130,300],[100,330],[100,420],[70,450],[-120,450],[-150,420],[-150,30],[-120,0]] }
+    pts: [[0,0],[280,0],[310,30],[310,160],[340,190],[480,190],[510,220],[510,400],[480,430],[330,430],[300,400],[300,330],[270,300],[130,300],[100,330],[100,420],[70,450],[-120,450],[-150,420],[-150,30],[-120,0]] },
+  { id: "fari", name: "Curva del Faro", theme: "isole", laps: 3, mult: 2.5, desc: "Ponti senza bordi tra le isole dei fari: chi sbaglia finisce in mare.",
+    pts: [[0,0],[560,0],[650,25],[690,95],[660,165],[590,180],[440,185],[380,225],[400,290],[340,340],[60,360],[-30,350],[-85,295],[-40,232],[-105,172],[-235,150],[-285,80],[-250,15],[-140,-15]] }
 ];
 export const circuitById = (id) => CIRCUITS.find((c) => c.id === id) || CIRCUITS[0];
 export const PRIZE = [400, 250, 150, 80, 50, 30];

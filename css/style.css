@@ -385,3 +385,18 @@ button.small { padding: 6px 12px; font-size: 14px; min-height: 0; }
 /* online: way out while waiting at the finish line */
 .mp-leave { position: fixed; left: 50%; top: calc(40% + 64px); transform: translateX(-50%); z-index: 6; background: var(--panel); padding: 10px 18px; }
 @media (max-height: 520px) and (orientation: landscape) { .mp-leave { top: calc(40% + 46px); padding: 7px 14px; } }
+.keys-note { font-size: 13px; }
+@media (hover: none) and (pointer: coarse) { .keys-note { display: none; } }
+/* intermediates: red = gap to the car ahead, green = lead on the car behind */
+.split-box { position: absolute; left: 50%; top: 92px; transform: translateX(-50%); display: grid; gap: 2px; justify-items: center;
+  background: rgba(22,20,28,0.82); border: 1px solid var(--line); border-radius: 12px; padding: 6px 14px 7px; pointer-events: none; z-index: 3; min-width: 170px; }
+.split-box small { font: 700 11px var(--f-ui); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-dim); }
+.split-box b { font: 800 19px var(--f-display); font-variant-numeric: tabular-nums; white-space: pre; }
+.split-box .sp-a { color: #ff6b5e; }
+.split-box .sp-b { color: #5fe39a; }
+@media (max-height: 520px) and (orientation: landscape) { .split-box { top: 64px; padding: 4px 12px 5px; } .split-box b { font-size: 16px; } }
+/* the split box sits on its own line under the chips, never over them */
+.split-row { flex: 0 0 100%; display: flex; justify-content: center; pointer-events: none; }
+.split-row .split-box { position: static; transform: none; margin-top: 2px; }
+.split-row:has(.split-box[hidden]) { display: none; }
+@media (orientation: portrait) { .split-row { justify-content: flex-end; } }
