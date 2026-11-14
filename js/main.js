@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {
-  CARS, TRACKS, PARTS, PART_ORDER, COLORS, brakePower, carById, trackById, cleanConfig, performance as perfOf,
+  CARS, GARAGE_ORDER, TRACKS, PARTS, PART_ORDER, COLORS, brakePower, carById, trackById, cleanConfig, performance as perfOf,
   carUnlocked, trackUnlocked, unlockText, priceOf, ownsCar, ownsPart, coinsEarned,
   CIRCUITS, circuitById, circuitUnlocked, prizeFor, AI_NAMES
 } from "./data.js";
@@ -250,7 +250,7 @@ function renderGarage(rebuildModel) {
   if (preview) cfg[preview.key] = preview.value;
   if (rebuildModel) showroom.setCar(car, cfg, locked);
   $("gName").textContent = car.name;
-  $("gKind").textContent = `${garageIdx + 1}/10 · ${car.kind}`;
+  $("gKind").textContent = `${GARAGE_ORDER.indexOf(car) + 1}/${GARAGE_ORDER.length} · ${car.kind}`;
   const lock = $("gLock");
   lock.hidden = !locked;
   lock.textContent = locked ? `Bloccata: ${unlockText(car)}.` : "";
@@ -348,8 +348,10 @@ function setPart(car, key, value) {
   scheduleSave();
   renderGarage(true);
 }
-$("carPrev").addEventListener("click", () => { preview = null; garageIdx = (garageIdx + CARS.length - 1) % CARS.length; renderGarage(true); });
-$("carNext").addEventListener("click", () => { preview = null; garageIdx = (garageIdx + 1) % CARS.length; renderGarage(true); });
+// arrows walk the cars from the slowest to the fastest (GARAGE_ORDER); garageIdx stays an index into CARS
+const stepCar = (d) => { const n = GARAGE_ORDER.length, k = GARAGE_ORDER.indexOf(CARS[garageIdx]); garageIdx = CARS.indexOf(GARAGE_ORDER[(k + d + n) % n]); };
+$("carPrev").addEventListener("click", () => { preview = null; stepCar(-1); renderGarage(true); });
+$("carNext").addEventListener("click", () => { preview = null; stepCar(1); renderGarage(true); });
 $("gUse").addEventListener("click", async () => {
   const car = CARS[garageIdx];
   if (!gAction) return;

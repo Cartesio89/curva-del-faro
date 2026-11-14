@@ -14,37 +14,58 @@ export const START_S = 60; // the car starts a bit down the road so there is tar
 // top: km/h, acc: 0-100 km/h in seconds, grip: lateral grip in m/s², mass: crash resistance 0..1
 // shape: body proportions used by the 3D builder (metres)
 export const CARS = [
-  { id: "lucciola", name: "Lucciola", kind: "Citycar", top: 185, acc: 11.0, grip: 10.5, mass: 0.35,
+  { id: "lucciola", tier: 0, col: 0, name: "Lucciola", kind: "Citycar", top: 185, acc: 11.0, grip: 10.5, mass: 0.35,
     unlock: { km: 0, cp: 0 },
     shape: { type: "hatch", L: 3.6, W: 1.64, H: 1.5, belt: 0.95, clr: 0.16, nose: 0.78, cabin: [0.27, 0.9], ws: 0.17, wheel: 0.3 } },
-  { id: "gabbiano", name: "Gabbiano", kind: "Hatchback sportiva", top: 210, acc: 8.5, grip: 11.5, mass: 0.45,
+  { id: "gabbiano", tier: 1, col: 1, name: "Gabbiano", kind: "Hatchback sportiva", top: 210, acc: 8.5, grip: 11.5, mass: 0.45,
     unlock: { km: 8, cp: 4 },
     shape: { type: "hatch", L: 4.05, W: 1.76, H: 1.44, belt: 0.92, clr: 0.14, nose: 0.74, cabin: [0.3, 0.88], ws: 0.2, wheel: 0.32 } },
-  { id: "delfino", name: "Delfino", kind: "Berlina", top: 225, acc: 7.6, grip: 11.5, mass: 0.6,
+  { id: "delfino", tier: 2, col: 2, name: "Delfino", kind: "Berlina", top: 225, acc: 7.6, grip: 11.5, mass: 0.6,
     unlock: { km: 20, cp: 5 },
     shape: { type: "notch", L: 4.7, W: 1.82, H: 1.45, belt: 0.92, clr: 0.15, nose: 0.76, cabin: [0.31, 0.76], ws: 0.2, wheel: 0.33 } },
-  { id: "medusa", name: "Medusa", kind: "Spider", top: 230, acc: 6.8, grip: 13, mass: 0.4,
+  { id: "medusa", tier: 3, col: 3, name: "Medusa", kind: "Spider", top: 230, acc: 6.8, grip: 13, mass: 0.4,
     unlock: { km: 40, cp: 6 },
     shape: { type: "roadster", L: 4.0, W: 1.75, H: 1.22, belt: 0.86, clr: 0.13, nose: 0.66, cabin: [0.42, 0.66], ws: 0.14, wheel: 0.32 } },
-  { id: "cormorano", name: "Cormorano", kind: "Rally", top: 220, acc: 5.9, grip: 14, mass: 0.55,
+  { id: "cormorano", tier: 4, col: 4, name: "Cormorano", kind: "Rally", top: 220, acc: 5.9, grip: 14, mass: 0.55,
     unlock: { km: 65, cp: 7 },
     shape: { type: "hatch", L: 4.1, W: 1.82, H: 1.5, belt: 0.98, clr: 0.24, nose: 0.8, cabin: [0.3, 0.88], ws: 0.2, wheel: 0.34 } },
-  { id: "squalo", name: "Squalo", kind: "Muscle car", top: 260, acc: 5.0, grip: 11.5, mass: 0.8,
+  { id: "squalo", tier: 5, col: 5, name: "Squalo", kind: "Muscle car", top: 260, acc: 5.0, grip: 11.5, mass: 0.8,
     unlock: { km: 100, cp: 8 },
     shape: { type: "fastback", L: 4.85, W: 1.92, H: 1.36, belt: 0.9, clr: 0.14, nose: 0.82, cabin: [0.42, 0.92], ws: 0.17, wheel: 0.35 } },
-  { id: "falco", name: "Falco", kind: "Gran turismo", top: 280, acc: 4.4, grip: 13.5, mass: 0.65,
+  { id: "falco", tier: 6, col: 6, name: "Falco", kind: "Gran turismo", top: 280, acc: 4.4, grip: 13.5, mass: 0.65,
     unlock: { km: 150, cp: 9 },
     shape: { type: "fastback", L: 4.6, W: 1.9, H: 1.3, belt: 0.84, clr: 0.12, nose: 0.66, cabin: [0.38, 0.9], ws: 0.22, wheel: 0.35 } },
-  { id: "orca", name: "Orca", kind: "Supercar", top: 300, acc: 3.6, grip: 15, mass: 0.6,
+  { id: "orca", tier: 7, col: 7, name: "Orca", kind: "Supercar", top: 300, acc: 3.6, grip: 15, mass: 0.6,
     unlock: { km: 220, cp: 10 },
     shape: { type: "wedge", L: 4.5, W: 1.98, H: 1.16, belt: 0.74, clr: 0.11, nose: 0.42, cabin: [0.3, 0.72], ws: 0.25, wheel: 0.35 } },
-  { id: "fulmine", name: "Fulmine", kind: "Hypercar", top: 330, acc: 2.9, grip: 16, mass: 0.6,
+  { id: "fulmine", tier: 8, col: 8, name: "Fulmine", kind: "Hypercar", top: 330, acc: 2.9, grip: 16, mass: 0.6,
     unlock: { km: 300, cp: 12 },
     shape: { type: "wedge", L: 4.65, W: 2.02, H: 1.1, belt: 0.7, clr: 0.1, nose: 0.36, cabin: [0.33, 0.7], ws: 0.27, wheel: 0.36 } },
-  { id: "faro", name: "Faro", kind: "Prototipo", top: 360, acc: 2.5, grip: 18, mass: 0.7,
+  { id: "faro", tier: 9, col: 9, name: "Faro", kind: "Prototipo", top: 360, acc: 2.5, grip: 18, mass: 0.7,
     unlock: { km: 400, cp: 14 },
-    shape: { type: "proto", L: 4.8, W: 2.0, H: 1.04, belt: 0.62, clr: 0.09, nose: 0.3, cabin: [0.36, 0.66], ws: 0.25, wheel: 0.36 } }
+    shape: { type: "proto", L: 4.8, W: 2.0, H: 1.04, belt: 0.62, clr: 0.09, nose: 0.3, cabin: [0.36, 0.66], ws: 0.25, wheel: 0.36 } },
+  // vintage-inspired cars (original designs, built by vintage.js). tier = parts price band, col = free default colour
+  { id: "formichina", tier: 0, col: 2, name: "Formichina", kind: "Piccola anni '30", top: 110, acc: 24.0, grip: 9.0, mass: 0.25,
+    unlock: { km: 3, cp: 2 }, shape: { type: "vintage", L: 3.25, W: 1.3, wheel: 0.3 } },
+  { id: "grillo", tier: 0, col: 1, name: "Grillo", kind: "Utilitaria anni '50", top: 115, acc: 22.0, grip: 9.5, mass: 0.25,
+    unlock: { km: 4, cp: 2 }, shape: { type: "vintage", L: 3.0, W: 1.34, wheel: 0.27 } },
+  { id: "contessa", tier: 1, col: 4, name: "Contessa", kind: "Limousine anni '30", top: 150, acc: 16.0, grip: 9.0, mass: 0.95,
+    unlock: { km: 15, cp: 4 }, shape: { type: "vintage", L: 5.3, W: 1.86, wheel: 0.42 } },
+  { id: "libeccio", tier: 1, col: 6, name: "Libeccio", kind: "Compatta anni '70", top: 175, acc: 11.5, grip: 11.0, mass: 0.4,
+    unlock: { km: 12, cp: 4 }, shape: { type: "vintage", L: 3.9, W: 1.6, wheel: 0.29 } },
+  { id: "brezza", tier: 2, col: 3, name: "Brezza", kind: "Berlina sportiva anni '80", top: 195, acc: 9.5, grip: 11.5, mass: 0.5,
+    unlock: { km: 25, cp: 5 }, shape: { type: "vintage", L: 4.2, W: 1.66, wheel: 0.31 } },
+  { id: "tempesta", tier: 4, col: 4, name: "Tempesta", kind: "Rally anni '80", top: 220, acc: 5.7, grip: 14.5, mass: 0.55,
+    unlock: { km: 70, cp: 7 }, shape: { type: "vintage", L: 3.95, W: 1.78, wheel: 0.32 } },
+  { id: "saetta", tier: 7, col: 0, name: "Saetta", kind: "Monoposto anni '70", top: 310, acc: 3.0, grip: 17.5, mass: 0.35,
+    unlock: { km: 260, cp: 11 }, shape: { type: "vintage", L: 4.4, W: 2.0, wheel: 0.31 } },
+  { id: "evo", tier: 8, col: 0, name: "Tempesta EVO", kind: "Rally estremo", top: 340, acc: 2.6, grip: 17.5, mass: 0.6,
+    unlock: { km: 330, cp: 13 }, shape: { type: "vintage", L: 3.95, W: 1.86, wheel: 0.33 } },
+  { id: "deluxe", tier: 8, col: 9, name: "Contessa Deluxe", kind: "Limousine sovralimentata", top: 345, acc: 2.8, grip: 16.5, mass: 1.0,
+    unlock: { km: 340, cp: 13 }, shape: { type: "vintage", L: 5.9, W: 1.92, wheel: 0.45 } }
 ];
+// the garage shows the cars from the slowest to the fastest
+export const GARAGE_ORDER = CARS.slice().sort((a, b) => a.top - b.top || a.acc - b.acc);
 export const carById = (id) => CARS.find((c) => c.id === id) || CARS[0];
 
 // ---------------------------------------------------------------- parts
@@ -87,8 +108,7 @@ export const BRAKE_BASE = 12;   // m/s² with stock brakes (all cars)
 export const COLORS = ["#c8352e", "#3fbfae", "#f2c14e", "#2b4fa3", "#f4f1e8", "#24212c", "#ff7a1a", "#2f9b6a", "#8e4fc2", "#9aa3ad"];
 
 export function defaultConfig(car) {
-  const i = CARS.indexOf(car);
-  return { color: COLORS[i % COLORS.length], engine: "serie", gears: "std", brakes: "serie", tyres: "medie", wing: car.shape.type === "wedge" || car.shape.type === "proto" ? "basso" : "nessuno", kit: "stradale", rims: "razze" };
+  return { color: COLORS[car.col % COLORS.length], engine: "serie", gears: "std", brakes: "serie", tyres: "medie", wing: car.shape.type === "wedge" || car.shape.type === "proto" ? "basso" : "nessuno", kit: "stradale", rims: "razze" };
 }
 
 export function cleanConfig(car, cfg) {
@@ -178,17 +198,18 @@ export function unlockText(item) {
 }
 
 // ---------------------------------------------------------------- coins (mirror of faro__catalog / faro__price on the server)
-export const CAR_PRICE = { lucciola: 0, gabbiano: 1500, delfino: 3000, medusa: 5000, cormorano: 7500, squalo: 10000, falco: 14000, orca: 19000, fulmine: 25000, faro: 33000 };
+export const CAR_PRICE = { lucciola: 0, gabbiano: 1500, delfino: 3000, medusa: 5000, cormorano: 7500, squalo: 10000, falco: 14000, orca: 19000, fulmine: 25000, faro: 33000,
+  formichina: 600, grillo: 800, contessa: 2500, libeccio: 2000, brezza: 3500, tempesta: 8000, saetta: 22000, evo: 28000, deluxe: 29000 };
 const PART_BASE = { "engine:compressore": 900, "engine:posteriore": 1100, "engine:v8": 1800, "gears:corti": 400, "gears:lunghi": 400, "tyres:dure": 300, "tyres:morbide": 500, "wing:basso": 300, "wing:alto": 600, "kit:sport": 600, "kit:corsa": 1200, "rims:multi": 200, "rims:pieni": 200, "brakes:sport": 500, "brakes:corsa": 1100, "brakes:carbo": 2000 };
 const FREE = ["engine:serie", "gears:std", "brakes:serie", "tyres:medie", "wing:nessuno", "kit:stradale", "rims:razze"];
 const WING_DEFAULT = ["orca", "fulmine", "faro"];
 const tierPrice = (base, idx) => Math.round((base * (1 + idx * 0.3)) / 10) * 10;
 
 export function priceOf(car, key, opt) {
-  const idx = CARS.indexOf(car);
+  const idx = car.tier;
   if (key === "car") return CAR_PRICE[car.id];
   const item = `${key}:${opt}`;
-  if (key === "color") return COLORS[idx % 10] === opt ? 0 : tierPrice(150, idx);
+  if (key === "color") return COLORS[car.col % 10] === opt ? 0 : tierPrice(150, idx);
   if (FREE.includes(item)) return 0;
   if (item === "wing:basso" && WING_DEFAULT.includes(car.id)) return 0;
   return PART_BASE[item] != null ? tierPrice(PART_BASE[item], idx) : null;

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { buildVintage } from "./vintage.js";
 
 // Procedural low-poly cars. Local frame: +Z = front, +X = right side... (X mirrored doesn't matter, car is symmetric), Y = up.
 // Origin at the centre of the footprint, on the ground.
@@ -74,6 +75,7 @@ function wheel(r, width, rims) {
 }
 
 export function buildCar(car, cfg) {
+  if (car.shape.type === "vintage") return buildVintage(car.id, cfg.color);
   const s = car.shape;
   const { L, W, H, clr: c, wheel: r } = s;
   const lowered = cfg.kit === "corsa" ? 0.04 : cfg.kit === "sport" ? 0.02 : 0;
