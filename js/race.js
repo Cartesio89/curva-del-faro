@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { World } from "./world.js";
 import { stepCar, smoothSteer, resolveContact, GRIP_ARCADE, oilSkid, OIL_TIME } from "./physics.js";
 import { buildCar, trafficTemplatesFor, disposeCar } from "./carmodel.js";
+import { startFall, stepFall, fallDone, Splashes } from "./fall.js";
 import { CARS, defaultConfig, performance, ROAD_HALF, LANE_W, START_TIME, CP_FIRST, CP_GAP, START_S, cpBonus } from "./data.js";
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -59,6 +60,7 @@ export class Race {
     this.timeLeft = START_TIME; this.elapsed = 0;
     this.cpReached = 0; this.near = 0; this.crashes = 0; this.coins = 0;
     this.turbo = 0; this.shield = 0; this.ghost = 0; this.slip = 0; this.slipDir = 1; this.shake = 0;
+    this.splashes = new Splashes(this.scene); this.camSnap = false;
     this.yaw = 0; this.latV = 0; this.body = null; this.steerSm = 0;
     this.state = "ready";
     this.camHeading = 0;
@@ -109,7 +111,7 @@ export class Race {
     const car = this.body || (this.body = { v: 0, x: 0, phi: 0, latV: 0 });
     car.v = this.v; car.x = this.x;
     const st = stepCar(car, road.k, steer, {
-      gas: live && input.gas, brake: live && input.brake,
+      gas: live && input.gas, brake: live && input.brake, brakeA: p.brakeA,
       G: p.grip * tr.grip * GRIP_ARCADE, top, a0: p.a0 * (this.turbo > 0 ? 1.6 : 1), offroad: tr.offroad,
       coast: this.state === "over" ? 4 : 1
     }, this.state === "ready" ? 0 : dt);
@@ -132,7 +134,8 @@ export class Race {
     if (live && this.v > (this.maxV || 0)) this.maxV = this.v;
     // off the edge where the ground is far below (the road runs over a gap, like a bridge): the car falls
     if (live && Math.abs(this.x) > this.world.edgeAt(this.s) && this.world.dropAt(this.s, this.x) > 2.5) {
-      this.fall = { t: 0, vy: 0, y0: this.world.sample(this.s, 0).y }; this.fallY = 0;
+      const y = this.player ? this.player.position.y : this.world.sample(this.s, this.x).y;   // exactly where it is drawn
+      this.fall = startFall(this.world, this.s, this.x, y, this.v, this.latV);
       this.hooks.onToast(this.track.sea ? "In mare!" : "Volo!", "bad");
       return;
     }
@@ -272,8 +275,11 @@ export class Race {
     // player
     w.sample(this.s, this.x, tmp);
     const P = this.player;
-    const offY = Math.abs(this.x) > ROAD_HALF + 0.7 ? w.groundAt(this.s, this.x) : tmp.y;
-    P.position.set(tmp.x, this.fall ? this.fall.y0 + this.fallY : offY, tmp.z);
+    P.position.set(tmp.x, this.fall ? this.fall.y : w.supportY(this.s, this.x, tmp.y), tmp.z);
+    if (this.fall && this.fall.landed && this.fall.sea != null && !this.fall.splashed) { this.fall.splashed = true; this.splashes.add(tmp.x, this.fall.sea, tmp.z); }
+    this.splashes.update(dtReal);
+    // just back on the road: the car blinks while it cannot be hit
+    P.visible = !(this.ghost > 0 && this.state === "run" && Math.floor(this.ghost * 8) % 2 === 1);
     let roll = -this.latV * 0.006;
     if (this.shake > 0) { P.position.x += rnd(-0.06, 0.06); P.position.y += rnd(0, 0.06); roll += rnd(-0.03, 0.03); }
     P.rotation.set(-tmp.slope, tmp.heading + this.yaw, roll, "YXZ");
@@ -303,15 +309,16 @@ export class Race {
     const dir = new THREE.Vector3(Math.sin(this.camHeading), 0, Math.cos(this.camHeading));
     const desired = new THREE.Vector3().copy(P.position).addScaledVector(dir, -dist);
     desired.y = P.position.y + hgt;
-    if (!this.camPos) this.camPos = desired.clone();
-    this.camPos.lerp(desired, 1 - Math.exp(-dtReal * 9));
+    if (!this.camPos || this.camSnap) { this.camPos = desired.clone(); this.camSnap = false; }
+    // while the car falls the camera stays up where the car left the road and watches it go
+    if (!this.fall) this.camPos.lerp(desired, 1 - Math.exp(-dtReal * 9));
     // keep camera above the ground on crests
     const camGround = w.terrainY(Math.max(0, this.s - dist), this.x) + 1.2;
     if (this.camPos.y < camGround) this.camPos.y = camGround;
     this.camera.position.copy(this.camPos);
     if (this.shake > 0) this.camera.position.add(new THREE.Vector3(rnd(-0.1, 0.1), rnd(-0.08, 0.08), 0));
-    const look = new THREE.Vector3().copy(P.position).addScaledVector(dir, 5);
-    look.y += 1.1;
+    const look = this.fall ? new THREE.Vector3().copy(P.position) : new THREE.Vector3().copy(P.position).addScaledVector(dir, 5);
+    look.y += this.fall ? 0.5 : 1.1;
     this.camera.lookAt(look);
     if (this.rearView) {
       // look back from the roof
@@ -335,13 +342,12 @@ export class Race {
   // falling off the edge: about a second in the air, then back on the road centre, standing still
   updateFall(dt) {
     const f = this.fall;
-    f.t += dt; f.vy += 9.8 * dt; this.fallY -= f.vy * dt;
-    this.s += this.v * dt * 0.7; this.x += Math.sign(this.x) * this.v * dt * 0.12; this.v *= Math.pow(0.5, dt);
+    this.s += stepFall(this.world, f, this.s, this.x, dt); this.x += f.dx; this.v = f.v;
     this.updateTraffic(dt);
     this.world.update(this.s);
     this.elapsed += dt; this.timeLeft -= dt;
-    if (f.t > 1.3 || this.timeLeft <= 0) {
-      this.fall = null; this.fallY = 0;
+    if (fallDone(f) || this.timeLeft <= 0) {
+      this.fall = null; this.camSnap = true; this.camHeading = this.world.sample(this.s, 0).heading;
       this.x = 0; this.v = 0; this.yaw = 0; this.steerSm = 0; this.latV = 0;
       this.body = { v: 0, x: 0, phi: 0, latV: 0 };
       this.ghost = 2;                                   // no instant crash into a car while restarting

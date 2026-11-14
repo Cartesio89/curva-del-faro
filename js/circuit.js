@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { CircuitWorld } from "./world.js";
 import { buildCar, disposeCar } from "./carmodel.js";
 import { stepCar, smoothSteer, maxYaw, resolveContact, GRIP_ARCADE, oilSkid, OIL_TIME } from "./physics.js";
+import { startFall, stepFall, fallDone, Splashes } from "./fall.js";
 import { CARS, COLORS, CIRCUITS, AI_NAMES, PARTS, PART_ORDER, defaultConfig, performance, ROAD_HALF } from "./data.js";
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -39,7 +40,9 @@ export function aiSpecs(circuit, car, cfg, aiNames, count = 5) {
     out.push({
       name: names[j], kind: "ai", carId: model.id, setup: mcfg,
       perf: { topMs: pStock.topMs * rel * (mSet.topMs / mStock.topMs), a0: pStock.a0 * rel * (mSet.a0 / mStock.a0),
-              grip: pStock.grip * rnd(0.98, 1.02) * (mSet.grip / mStock.grip) },
+              grip: pStock.grip * rnd(0.98, 1.02) * (mSet.grip / mStock.grip),
+              // brakes: half of the player's upgrade plus half of its own (never above a car with the best brakes)
+              brakeA: pStock0.brakeA * (1 + 0.5 * (pAct.brakeA / pStock0.brakeA - 1) + 0.5 * (mSet.brakeA / mStock.brakeA - 1)) },
       skill: clamp(skill0 + rnd(0, 0.07) + (j === 0 ? 0.02 : 0), 0.5, 0.8), aggr: rnd(0.3, 0.9)
     });
   }
@@ -55,6 +58,7 @@ export function circuitItems(count = 18) {
   for (let i = 0; i < count; i++) {
     let r = Math.random() * total, type = bag[0][0];
     for (const [t, w] of bag) { if ((r -= w) < 0) { type = t; break; } }
+    if (type === "oil" && Math.random() < 0.2) continue;   // 20% fewer oil patches, nothing else changes
     // spread evenly with some jitter, away from the start/finish line
     const f = 0.06 + (i + Math.random() * 0.6) / count * 0.9;
     out.push({ id: i, f: Math.round(f * 10000) / 10000, x: Math.round((Math.random() * 7.2 - 3.6) * 10) / 10, type });
@@ -89,6 +93,7 @@ export class CircuitRace {
     this.hooks = hooks;
     this.mobile = !!opts.mobile;
     const scene = (this.scene = new THREE.Scene());
+    this.splashes = new Splashes(scene); this.camSnap = false;
     scene.fog = new THREE.Fog(track.fog, track.fogNear, track.fogFar);
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.3, 6000);
     scene.add(new THREE.HemisphereLight(track.hemi[0], track.hemi[1], track.hemiI));
@@ -201,7 +206,7 @@ export class CircuitRace {
     if (oiled) { this.slip -= dt; target = this.slipDir * 0.4; }     // oil: the car slides on its own
     if (target == null && input.tilt != null) c.steerSm = (c.steerSm || 0) + (input.tilt - (c.steerSm || 0)) * Math.min(1, dt * 12);
     else c.steerSm = smoothSteer(c.steerSm || 0, target ?? (input.right ? 1 : 0) - (input.left ? 1 : 0), dt);
-    const st = stepCar(c, k, c.steerSm, { gas: input.gas, brake: input.brake, G: p.grip * tr.grip * GRIP_ARCADE * (this.slip > 0 ? 0.6 : 1),
+    const st = stepCar(c, k, c.steerSm, { gas: input.gas, brake: input.brake, brakeA: p.brakeA, G: p.grip * tr.grip * GRIP_ARCADE * (this.slip > 0 ? 0.6 : 1),
       top: p.topMs * this.draft(c) * (boost ? 1.2 : 1), a0: p.a0 * (boost ? 1.6 : 1), offroad: tr.offroad }, dt);
     if (oiled) oilSkid(c, this.slipDir, dt);
     this.pickups(c);
@@ -247,7 +252,7 @@ export class CircuitRace {
     if (this.track.sea) {
       if (Math.abs(c.x) > ROAD_HALF + 2) c.v *= Math.pow(0.985, dt * 60);
       if (!c.fall && !c.remote && Math.abs(c.x) > this.world.edgeAt(c.s) && this.world.dropAt(c.s, c.x) > 2.5) {
-        c.fall = { t: 0, vy: 0 }; c.fallY = 0;
+        c.fall = startFall(this.world, c.s, c.x, c.obj.position.y, c.v, c.latV);   // from exactly where it is drawn
         if (c.isPlayer) { this.shake = 0.3; this.hooks.onToast("In mare!", "bad"); }
       }
       c.x = clamp(c.x, -120, 120);
@@ -272,7 +277,7 @@ export class CircuitRace {
   speedProfile(c) {
     const L = this.line, n = L.n, ds = L.segL, tr = this.track, p = c.perf;
     const G = p.grip * tr.grip * GRIP_ARCADE * c.skill * 0.985;
-    const brake = 11.5 * c.skill, top = p.topMs;
+    const brake = (p.brakeA || 12) * 0.96 * c.skill, top = p.topMs;
     const v = new Float64Array(n);
     for (let i = 0; i < n; i++) { const k = L.ka[i]; v[i] = Math.min(top, k > 1e-5 ? Math.sqrt(G / k) : top); }
     for (let pass = 0; pass < 2; pass++) for (let i = n - 1; i >= 0; i--) {
@@ -363,7 +368,7 @@ export class CircuitRace {
     const steer = clamp(yawWant / Math.max(1e-3, maxYaw(c.v, G)), -1, 1);
     const stopping = this.state === "finished" && c.finished && c.v > 15;
     const st = stepCar(c, kHere, steer,
-      { gas: gas && !stopping, brake: brake || stopping, G, top, a0: p.a0 * band, offroad: tr.offroad }, dt);
+      { gas: gas && !stopping, brake: brake || stopping, brakeA: p.brakeA, G, top, a0: p.a0 * band, offroad: tr.offroad }, dt);
     this.barrier(c, dt);
     return st.ds;
   }
@@ -450,11 +455,11 @@ export class CircuitRace {
   // fell into the sea: about a second in the air, then back on the road centre, standing still
   updateFall(c, dt) {
     const f = c.fall;
-    f.t += dt; f.vy += 9.8 * dt; c.fallY -= f.vy * dt;
-    const ds = c.v * dt * 0.7;
-    c.x += Math.sign(c.x) * c.v * dt * 0.12; c.v *= Math.pow(0.5, dt);
-    if (f.t > 1.3) {
-      c.fall = null; c.fallY = 0;
+    const ds = stepFall(this.world, f, c.s, c.x, dt);
+    c.x += f.dx; c.v = f.v;
+    if (fallDone(f)) {
+      c.fall = null;
+      if (c.isPlayer) { this.camSnap = true; this.camHeading = this.world.sample(c.s, 0).heading; }
       c.x = 0; c.v = 0; c.phi = 0; c.latV = 0; c.steerSm = 0; c.ghostT = this.t + 2;
       if (c.isPlayer) { this.slip = 0; this.hooks.onToast("Riparti da centro pista", "bad"); }
     }
@@ -588,13 +593,21 @@ export class CircuitRace {
     const w = this.world, tmp = {};
     for (const c of this.cars) {
       w.sample(c.s, c.x, tmp);
-      c.obj.position.set(tmp.x, tmp.y + (c.fallY || 0) + (c.remote && c.netFall ? -6 : 0), tmp.z);
+      let y = c.fall ? c.fall.y : w.supportY(c.s, c.x, tmp.y);
+      if (c.remote) {   // another player's car in the water: we only know that it fell, show it going down
+        c.rfy = c.netFall ? Math.max(this.track.sea ? this.track.seaY - 1.1 : y - 8, (c.rfy ?? y) - 9 * dtReal) : null;
+        if (c.rfy != null) y = c.rfy;
+      }
+      c.obj.position.set(tmp.x, y, tmp.z);
+      if (c.fall && c.fall.landed && c.fall.sea != null && !c.fall.splashed) { c.fall.splashed = true; this.splashes.add(tmp.x, c.fall.sea, tmp.z); }
+      c.obj.visible = !(c.ghostT > this.t && Math.floor((c.ghostT - this.t) * 8) % 2 === 1);
       let roll = -c.latV * 0.006;
       if (c.isPlayer && this.shake > 0) { c.obj.position.x += rnd(-0.06, 0.06); roll += rnd(-0.03, 0.03); }
       c.obj.rotation.set(0, tmp.heading + c.yaw, roll, "YXZ");
       const r = c.obj.userData.radius || 0.32;
       for (const wh of c.obj.userData.wheels || []) wh.userData.spin.rotation.x += (c.v / r) * dtReal;
     }
+    this.splashes.update(dtReal);
     const P = this.player.obj;
     P.userData.tail.emissiveIntensity = this.state !== "run" || this.lastBrake ? 2.2 : 0.6;
     w.sample(this.player.s, this.player.x, tmp);
@@ -604,11 +617,12 @@ export class CircuitRace {
     const dir = new THREE.Vector3(Math.sin(this.camHeading), 0, Math.cos(this.camHeading));
     const desired = new THREE.Vector3().copy(P.position).addScaledVector(dir, -dist);
     desired.y = P.position.y + hgt;
-    if (!this.camPos) this.camPos = desired.clone();
-    this.camPos.lerp(desired, 1 - Math.exp(-dtReal * 9));
+    if (!this.camPos || this.camSnap) { this.camPos = desired.clone(); this.camSnap = false; }
+    // while my car falls the camera stays where it left the road and watches it go
+    if (!this.player.fall) this.camPos.lerp(desired, 1 - Math.exp(-dtReal * 9));
     this.camera.position.copy(this.camPos);
     if (this.shake > 0) this.camera.position.add(new THREE.Vector3(rnd(-0.1, 0.1), rnd(-0.08, 0.08), 0));
-    const look = new THREE.Vector3().copy(P.position).addScaledVector(dir, 5); look.y += 1.1;
+    const look = this.player.fall ? new THREE.Vector3().copy(P.position).setY(P.position.y + 0.5) : new THREE.Vector3().copy(P.position).addScaledVector(dir, 5).setY(P.position.y + 1.1);
     this.camera.lookAt(look);
     if (this.rearView) {
       // look back from the roof

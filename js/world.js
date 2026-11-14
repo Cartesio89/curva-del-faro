@@ -490,11 +490,11 @@ export class World {
     this.curIsl = 0;
     if (s0 < 200) { this.addRoad(0, 44, 0, 0, 0); markIsland(n0, 80); this.pieceKind = "island"; return; }
     if (this.pieceKind !== "bridge") {
-      const len = rnd(260, 640);
+      const len = rnd(500, 1100);                       // long enough for the fastest cars to reach top speed
       const n = segs(len), h = Math.floor(n / 2);
       const bend = force === 0 ? 0 : force ? force : Math.random() < 0.35 ? (Math.random() < 0.5 ? -1 : 1) : 0;
       const k = bend ? bend * rnd(1 / 900, 1 / 380) : 0;
-      const rise = 4 + len / 140;                       // arched: highest in the middle
+      const rise = Math.min(12, 4 + len / 140);         // arched: highest in the middle
       this.addRoad(3, h - 3, 0, k, rise);
       this.addRoad(0, n - h - 3, 3, k, -rise);
       this.lastY = 0; this.py[this.py.length - 1] = 0;
@@ -537,7 +537,8 @@ export class World {
         const tot = weights.reduce((a, w) => a + w[1], 0);
         let roll = Math.random() * tot, type = "clock";
         for (const [t, w] of weights) if ((roll -= w) < 0) { type = t; break; }
-        this.items.push({ s, x: pick([-LANE_W, 0, LANE_W]) + rnd(-0.4, 0.4), type, taken: false, obj: null });
+        // 20% fewer oil patches than before (the other items are unchanged)
+        if (!(type === "oil" && Math.random() < 0.2)) this.items.push({ s, x: pick([-LANE_W, 0, LANE_W]) + rnd(-0.4, 0.4), type, taken: false, obj: null });
       }
       this.nextItemS += rnd(70, 160) / (1 + d * 0.6);
     }
@@ -697,6 +698,15 @@ export class World {
   // height of the ground actually drawn at (s, x), and how far below the road it is
   groundAt(s, x) { return this.groundY(s, x, this.loopL ? null : this.roadGrid(s, s)); }
   dropAt(s, x) { return this.sample(s, 0, this._dr || (this._dr = {})).y - this.groundAt(s, x); }
+  // height the car stands on: the road (and a bridge's paved margin) at road level, otherwise the ground
+  supportY(s, x, roadY) {
+    const ax = Math.abs(x);
+    if (ax <= ROAD_HALF + 0.7) return roadY;
+    const g = this.groundAt(s, x);
+    if (roadY - g > 2.5) return roadY;                           // over a drop: on the deck, or about to fall (the fall draws itself)
+    if (ax <= this.edgeAt(s) && roadY - g > 0.6) return roadY;   // still on the paved margin / shoulder
+    return g;
+  }
   onOtherRoad(grid, wx, wz, s, margin) {
     if (!grid || s === undefined) return false;
     const C = grid.C, cx = Math.floor(wx / C), cz = Math.floor(wz / C);

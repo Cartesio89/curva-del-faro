@@ -55,6 +55,12 @@ export const PARTS = {
     { id: "compressore", label: "Compressore", acc: 1.1, top: 1.03, grip: 0.98 },
     { id: "posteriore", label: "Posteriore", acc: 1.05, grip: 1.06 },
     { id: "v8", label: "V8 a vista", acc: 1.12, top: 1.06, grip: 0.99 } ] },
+  // brakes: the gain (brk) grows with the car's power — a hypercar gets much more out of racing brakes than a citycar
+  brakes: { label: "Freni", options: [
+    { id: "serie", label: "Di serie" },
+    { id: "sport", label: "Sportivi", brk: 0.3 },
+    { id: "corsa", label: "Da corsa", brk: 0.7 },
+    { id: "carbo", label: "Carboceramici", brk: 1.3 } ] },
   gears: { label: "Rapporti", options: [
     { id: "corti", label: "Corti", top: 0.92, acc: 1.12 },
     { id: "std", label: "Standard" },
@@ -74,12 +80,15 @@ export const PARTS = {
   rims: { label: "Cerchi", options: [
     { id: "razze", label: "5 razze" }, { id: "multi", label: "Multirazze" }, { id: "pieni", label: "Lenticolari" } ] }
 };
-export const PART_ORDER = ["engine", "gears", "tyres", "wing", "kit", "rims"];
+export const PART_ORDER = ["engine", "gears", "brakes", "tyres", "wing", "kit", "rims"];
+// how much of a brake upgrade a car can use: 0.35 for small cars, 1 for the 360 km/h prototype
+export const brakePower = (car) => Math.min(1, Math.max(0.35, (car.top - 150) / 210));
+export const BRAKE_BASE = 12;   // m/s² with stock brakes (all cars)
 export const COLORS = ["#c8352e", "#3fbfae", "#f2c14e", "#2b4fa3", "#f4f1e8", "#24212c", "#ff7a1a", "#2f9b6a", "#8e4fc2", "#9aa3ad"];
 
 export function defaultConfig(car) {
   const i = CARS.indexOf(car);
-  return { color: COLORS[i % COLORS.length], engine: "serie", gears: "std", tyres: "medie", wing: car.shape.type === "wedge" || car.shape.type === "proto" ? "basso" : "nessuno", kit: "stradale", rims: "razze" };
+  return { color: COLORS[i % COLORS.length], engine: "serie", gears: "std", brakes: "serie", tyres: "medie", wing: car.shape.type === "wedge" || car.shape.type === "proto" ? "basso" : "nessuno", kit: "stradale", rims: "razze" };
 }
 
 export function cleanConfig(car, cfg) {
@@ -93,17 +102,18 @@ export function cleanConfig(car, cfg) {
 
 // Final performance after parts. Returns SI units plus display values.
 export function performance(car, cfg) {
-  let top = 1, acc = 1, grip = 1;
+  let top = 1, acc = 1, grip = 1, brk = 0;
   for (const k of PART_ORDER) {
     const o = PARTS[k].options.find((x) => x.id === cfg[k]);
     if (!o) continue;
-    top *= o.top || 1; acc *= o.acc || 1; grip *= o.grip || 1;
+    top *= o.top || 1; acc *= o.acc || 1; grip *= o.grip || 1; brk += o.brk || 0;
   }
   const topKmh = car.top * top;
   const acc0100 = car.acc / acc;
   return {
     topKmh, acc0100, grip: car.grip * grip, mass: car.mass,
     topMs: topKmh / 3.6,
+    brakeA: BRAKE_BASE * (1 + brk * brakePower(car)),     // braking deceleration, m/s²
     a0: (100 / 3.6) / acc0100 * 1.14 // launch accel; falls off with speed (calibrated so the 0-100 shown is the real one)
   };
 }
@@ -169,8 +179,8 @@ export function unlockText(item) {
 
 // ---------------------------------------------------------------- coins (mirror of faro__catalog / faro__price on the server)
 export const CAR_PRICE = { lucciola: 0, gabbiano: 1500, delfino: 3000, medusa: 5000, cormorano: 7500, squalo: 10000, falco: 14000, orca: 19000, fulmine: 25000, faro: 33000 };
-const PART_BASE = { "engine:compressore": 900, "engine:posteriore": 1100, "engine:v8": 1800, "gears:corti": 400, "gears:lunghi": 400, "tyres:dure": 300, "tyres:morbide": 500, "wing:basso": 300, "wing:alto": 600, "kit:sport": 600, "kit:corsa": 1200, "rims:multi": 200, "rims:pieni": 200 };
-const FREE = ["engine:serie", "gears:std", "tyres:medie", "wing:nessuno", "kit:stradale", "rims:razze"];
+const PART_BASE = { "engine:compressore": 900, "engine:posteriore": 1100, "engine:v8": 1800, "gears:corti": 400, "gears:lunghi": 400, "tyres:dure": 300, "tyres:morbide": 500, "wing:basso": 300, "wing:alto": 600, "kit:sport": 600, "kit:corsa": 1200, "rims:multi": 200, "rims:pieni": 200, "brakes:sport": 500, "brakes:corsa": 1100, "brakes:carbo": 2000 };
+const FREE = ["engine:serie", "gears:std", "brakes:serie", "tyres:medie", "wing:nessuno", "kit:stradale", "rims:razze"];
 const WING_DEFAULT = ["orca", "fulmine", "faro"];
 const tierPrice = (base, idx) => Math.round((base * (1 + idx * 0.3)) / 10) * 10;
 
@@ -205,7 +215,7 @@ export const CIRCUITS = [
   { id: "notte", name: "Notturno", theme: "citta", laps: 3, mult: 2, desc: "Cittadino a curve secche, di notte.",
     pts: [[0,0],[280,0],[310,30],[310,160],[340,190],[480,190],[510,220],[510,400],[480,430],[330,430],[300,400],[300,330],[270,300],[130,300],[100,330],[100,420],[70,450],[-120,450],[-150,420],[-150,30],[-120,0]] },
   { id: "fari", name: "Curva del Faro", theme: "isole", laps: 3, mult: 2.5, desc: "Ponti senza bordi tra le isole dei fari: chi sbaglia finisce in mare.",
-    pts: [[0,0],[560,0],[650,25],[690,95],[660,165],[590,180],[440,185],[380,225],[400,290],[340,340],[60,360],[-30,350],[-85,295],[-40,232],[-105,172],[-235,150],[-285,80],[-250,15],[-140,-15]] }
+    pts: [[0,0],[1000,0],[1090,25],[1130,95],[1100,165],[1030,180],[880,185],[820,225],[840,290],[780,340],[60,360],[-30,350],[-85,295],[-40,232],[-105,172],[-235,150],[-285,80],[-250,15],[-140,-15]] }
 ];
 export const circuitById = (id) => CIRCUITS.find((c) => c.id === id) || CIRCUITS[0];
 export const PRIZE = [400, 250, 150, 80, 50, 30];

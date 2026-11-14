@@ -14,12 +14,12 @@ export const maxYaw = (v, G) => Math.min(G / Math.max(v, 4), 0.14 * v);
 
 /**
  * c: {v, x, phi}; k: road curvature (+ = right-hand corner); steer in [-1, 1] (+ = right, fraction of maxYaw)
- * opt: {gas, brake, G, top, a0, offroad, coast}
+ * opt: {gas, brake, brakeA, G, top, a0, offroad, coast}
  */
 export function stepCar(c, k, steer, opt, dt) {
   const v0 = c.v;
   let a;
-  if (opt.brake) a = -12;
+  if (opt.brake) a = -(opt.brakeA || 12);
   else if (opt.gas) a = v0 < opt.top ? opt.a0 * Math.max(0.08, 1 - Math.pow(v0 / opt.top, 1.8)) : -2;
   else a = -(1.2 + 0.00045 * v0 * v0) * (opt.coast || 1);
   if (Math.abs(c.x) > ROAD_HALF + 0.6 && v0 > opt.top * opt.offroad) a -= 14;

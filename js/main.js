@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {
-  CARS, TRACKS, PARTS, PART_ORDER, COLORS, carById, trackById, cleanConfig, performance as perfOf,
+  CARS, TRACKS, PARTS, PART_ORDER, COLORS, brakePower, carById, trackById, cleanConfig, performance as perfOf,
   carUnlocked, trackUnlocked, unlockText, priceOf, ownsCar, ownsPart, coinsEarned,
   CIRCUITS, circuitById, circuitUnlocked, prizeFor, AI_NAMES
 } from "./data.js";
@@ -208,16 +208,18 @@ function effectText(key, value) {
   if (key === "color") return "solo estetica";
   const o = PARTS[key].options.find((x) => x.id === value);
   const bits = [];
+  if (o.brk) bits.push(`frenata +${Math.round(o.brk * brakePower(CARS[garageIdx]) * 100)}% su questa auto`);
   if (o.top && o.top !== 1) bits.push(`velocità max ${pct(o.top)}`);
   if (o.acc && o.acc !== 1) bits.push(`accelerazione ${pct(o.acc)}`);
   if (o.grip && o.grip !== 1) bits.push(`tenuta ${pct(o.grip)}`);
   if (bits.length) return bits.join(", ");
   return key === "rims" ? "solo estetica" : "base: nessun bonus né malus";
 }
+const brakeDist = (p) => Math.max(0, Math.round((p.topMs ** 2 - (100 / 3.6) ** 2) / (2 * p.brakeA)));
 function perfBars(car, cfg, nowCfg) {
   const p = perfOf(car, cfg), r = perfOf(car, cleanConfig(car, null));
   const n = nowCfg ? perfOf(car, nowCfg) : null;     // when trying a part: what you have mounted now
-  const fTop = (v) => (v - 150) / 260, fAcc = (v) => (13 - v) / 11, fGrip = (v) => (v - 8) / 14;
+  const fTop = (v) => (v - 150) / 260, fAcc = (v) => (13 - v) / 11, fGrip = (v) => (v - 8) / 14, fBrk = (v) => (v - 9) / 21;
   const num = (x, dec) => x.toFixed(dec).replace(".", ",");
   const sg = (x) => (x > 0 ? "+" : "−");
   const dTop = Math.round(p.topKmh - r.topKmh), dAcc = p.acc0100 - r.acc0100, dGrip = (p.grip - r.grip) / 9.81;
@@ -231,7 +233,10 @@ function perfBars(car, cfg, nowCfg) {
     statBar("0-100", fAcc(p.acc0100), fAcc(r.acc0100), num(p.acc0100, 1) + " s", Math.abs(dAcc) >= 0.05 ? sg(dAcc) + num(Math.abs(dAcc), 1) + " s" : "", dAcc < 0,
       n && Math.abs(nAcc) >= 0.05 ? `${sg(nAcc)}${num(Math.abs(nAcc), 1)} s vs ora` : ""),
     statBar("Tenuta", fGrip(p.grip), fGrip(r.grip), num(p.grip / 9.81, 2) + " g", Math.abs(dGrip) >= 0.005 ? sg(dGrip) + num(Math.abs(dGrip), 2) + " g" : "", dGrip > 0,
-      n && Math.abs(nGrip) >= 0.005 ? `${sg(nGrip)}${num(Math.abs(nGrip), 2)} g vs ora` : "")
+      n && Math.abs(nGrip) >= 0.005 ? `${sg(nGrip)}${num(Math.abs(nGrip), 2)} g vs ora` : ""),
+    // braking: the distance to go from top speed down to 100 km/h, the number that matters before a hairpin
+    statBar("Frenata", fBrk(p.brakeA), fBrk(r.brakeA), `${brakeDist(p)} m da ${Math.round(p.topKmh)} a 100`, p.brakeA - r.brakeA > 0.05 ? `+${num((p.brakeA - r.brakeA) / 9.81, 2)} g` : "", true,
+      n && Math.abs(p.brakeA - n.brakeA) > 0.05 ? `${sg(p.brakeA - n.brakeA)}${num(Math.abs(p.brakeA - n.brakeA) / 9.81, 2)} g vs ora` : "")
   ];
 }
 let gAction = null;
@@ -739,7 +744,7 @@ function setupText(cfg) {
   const bits = [];
   for (const k of PART_ORDER) {
     const o = PARTS[k].options;
-    if (cfg[k] && cfg[k] !== o[k === "tyres" ? 1 : k === "gears" ? 1 : 0].id && k !== "rims") bits.push(o.find((x) => x.id === cfg[k]).label.toLowerCase());
+    if (cfg[k] && cfg[k] !== o[k === "tyres" ? 1 : k === "gears" ? 1 : 0].id && k !== "rims") bits.push((k === "brakes" ? "freni " : "") + o.find((x) => x.id === cfg[k]).label.toLowerCase());
   }
   return bits.length ? " · " + bits.join(", ") : "";
 }
