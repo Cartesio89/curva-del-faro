@@ -136,7 +136,7 @@ export function initOnline(ctx) {
     roomCh.on("next", (m) => onNext(m));
     roomCh.on("exit", (m) => onExitMsg(m));
     // voice radio: everybody can switch it on; it links to the others who have it on
-    if (radio) radio.stop(true);
+    if (radio) radio.destroy();
     radio = new Radio({ send: (t, d) => roomCh && roomCh.send(t, d), on: (t, f) => roomCh.on(t, f), me: me(), token: ctx.token, onChange: renderRadio });
     roomCh.track({ name: me() });
     if (!(await roomCh.subscribe())) ctx.toast("Collegamento in tempo reale non riuscito: riprova tra poco.", "bad");
@@ -173,11 +173,29 @@ export function initOnline(ctx) {
       st.textContent = !on ? (others.length ? `Radio accesa da: ${others.join(", ")}.` : "Nessuno ha la radio accesa.")
         : linked.length ? `In radio con: ${linked.join(", ")}.` : others.length ? `Collego ${others.join(", ")}…` : "Aspetto che qualcun altro accenda la radio.";
     }
+    // MIC on the race screen, for the whole challenge: first tap switches the radio on, then it toggles my microphone
     const mic = $("micBtn");
-    mic.hidden = !on;
-    mic.textContent = radio && radio.muted ? "MIC off" : "MIC";
-    mic.classList.toggle("muted", !!(radio && radio.muted));
-    ctx.duck(on && radio.linked().length > 0);
+    mic.hidden = !room;
+    const live = on && !radio.muted;
+    put(mic, live ? "MIC ON" : "MIC OFF");
+    mic.classList.toggle("muted", !live);
+    mic.classList.toggle("live", live);
+    mic.setAttribute("aria-label", live ? "Microfono acceso: tocca per spegnerlo" : "Microfono spento: tocca per accenderlo");
+    // radio on: engines and tyres go way down so voices are clear
+    ctx.duck(on);
+  }
+  const put = (el, t) => { if (el.textContent !== t) el.textContent = t; };
+  async function micTap() {
+    if (!radio) return;
+    if (!radio.on) {
+      const r = await radio.start();
+      if (r === "denied") ctx.toast("Microfono non permesso: abilitalo nelle impostazioni del browser.", "bad");
+      else if (r === "unsupported") ctx.toast("Questo browser non supporta la radio.", "bad");
+      else ctx.toast("Radio accesa", "good");
+      return;
+    }
+    radio.setMuted(!radio.muted);
+    ctx.toast(radio.muted ? "Microfono spento (senti ancora gli altri)" : "Microfono acceso", radio.muted ? "" : "good");
   }
   $("radioBtn").addEventListener("click", async () => {
     if (!radio) return;
@@ -186,9 +204,9 @@ export function initOnline(ctx) {
     if (r === "denied") ctx.toast("Microfono non permesso: abilitalo nelle impostazioni del browser.", "bad");
     else if (r === "unsupported") ctx.toast("Questo browser non supporta la radio.", "bad");
   });
-  { let t = 0; const f = () => { if (radio && radio.on) radio.setMuted(!radio.muted); };
-    $("micBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); t = performance.now(); f(); });
-    $("micBtn").addEventListener("click", () => { if (performance.now() - t > 700) f(); }); }
+  { let t = 0;
+    $("micBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); t = performance.now(); micTap(); });
+    $("micBtn").addEventListener("click", () => { if (performance.now() - t > 700) micTap(); }); }
   setInterval(() => { if (radio && radio.on) renderRadio(); }, 2000);
 
   function renderRoom() {
@@ -419,7 +437,7 @@ export function initOnline(ctx) {
     $("oMp").hidden = false;
     $("again").hidden = true;
     $("toBox").textContent = "Esci dalla sfida";
-    if (m.hostGone) renderGone(); else renderDecision(winner);
+    if (m.quitBy) renderQuit(m.quitBy, winner === me()); else if (m.hostGone) renderGone(); else renderDecision(winner);
     ctx.show("scrOver");
     $("oBoardTitle").textContent = "Top 10 · Sfide";
     ctx.api.topChallenges().then((rows) => ctx.renderBoard($("oBoard"), rows, me(), "challenges"));
@@ -474,6 +492,14 @@ export function initOnline(ctx) {
   function onExitMsg(m) {
     if (!room) return;
     const stay = (room.members || []).filter((x) => x.state === "joined" && x.name !== m.by);
+    const race = ctx.race();
+    // during a race, the last other real player quits: whoever is still in the race wins
+    if (started && !result && race && stay.length <= 1) {
+      const quitter = race.cars.find((c) => c.human && c.name === m.by);
+      if (myFinish) { onResult({ ...localOrder(race), quitBy: m.by }); return; }          // I'm home: my result already stands
+      if (quitter && quitter.finished) { closed(`${m.by} ha vinto ed è uscito dalla sfida.`); return; }
+      forfeitWin(m.by, race); return;
+    }
     if (m.by === room.host || stay.length < 2) { closed(`${m.by} ha chiuso la sfida.`); return; }
     room.members = (room.members || []).map((x) => (x.name === m.by ? { ...x, state: "left" } : x));
     ctx.toast(`${m.by} è uscito dalla sfida.`);
@@ -481,6 +507,45 @@ export function initOnline(ctx) {
       const next = result.order.find((o) => o.human && room.members.some((x) => x.name === o.name && x.state === "joined"));
       renderDecision(next ? next.name : null);
     } else if (!started) renderRoom();
+  }
+  // the other player quit before the finish: my race stops here and the challenge is mine
+  async function forfeitWin(by, race) {
+    const pos = race.position(race.player);
+    const vmax = race.player.maxV > 0 ? Math.round(race.player.maxV * 3.6 * 10) / 10 : null;
+    const no = raceNo, roomId = room.id;
+    result = { raceNo: no, forfeit: true };
+    leaveBtn(false);
+    ctx.endRaceKeepRoom();
+    $("oTitle").textContent = "Hai vinto la sfida!";
+    $("oDist").textContent = "1°"; $("oUnit").textContent = "tra i giocatori";
+    $("oL1").textContent = "Tempo"; $("oTime").textContent = "—";
+    $("oL2").textContent = "Giro migliore"; $("oCp").textContent = race.player.best != null ? ctx.fmtLap(race.player.best) : "—";
+    $("oL3").textContent = "Motivo"; $("oNear").textContent = `${by} si è ritirato`;
+    $("oL4").textContent = "Premio"; $("oHit").textContent = ctx.fmtC(0);
+    $("oOrder").hidden = true; $("oChamp").hidden = true; $("oUnlocks").textContent = "";
+    $("oVmax").hidden = !(vmax > 0); $("oVmax").textContent = vmax > 0 ? `Velocità massima raggiunta: ${Math.round(vmax)} km/h` : "";
+    $("again").hidden = true; $("toBox").textContent = "Esci dalla sfida";
+    renderQuit(by, true);
+    $("oMp").hidden = false;
+    ctx.show("scrOver");
+    const save = $("oSave"); save.textContent = "Registro la vittoria…";
+    let r = null;
+    for (let i = 0; i < 4; i++) {           // the other one's exit may reach the server a moment after its message
+      r = await ctx.api.challengeForfeit(ctx.token(), roomId, no, pos, vmax).catch(() => ({ error: "network" }));
+      if (!(r && (r.error === "implausible" || r.error === "network"))) break;
+      await new Promise((res) => setTimeout(res, 1200));
+    }
+    if (r && r.profile) { ctx.setProfile(r.profile, true); save.textContent = "Vittoria per ritiro registrata in classifica Sfide (senza tempo né monete)."; }
+    else if (r && r.error === "duplicate") save.textContent = "Vittoria già registrata.";
+    else save.textContent = ctx.ERRORS[r && r.error] || "Vittoria non registrata.";
+    $("oBoardTitle").textContent = "Top 10 · Sfide";
+    ctx.api.topChallenges().then((rows) => ctx.renderBoard($("oBoard"), rows, me(), "challenges"));
+  }
+  function renderQuit(by, won) {
+    const box = $("oMp"); box.textContent = "";
+    const p = document.createElement("p"); p.className = "note";
+    p.textContent = `${by} è uscito dalla sfida${won ? ": hai vinto tu" : ""}. La sfida è finita.`;
+    box.appendChild(p);
   }
   function renderGone() {
     const box = $("oMp"); box.textContent = "";
@@ -490,16 +555,17 @@ export function initOnline(ctx) {
   }
   async function exit() {
     if (!room) return;
-    const id = room.id;
-    if (roomCh) roomCh.send("exit", { by: me() });
-    await ctx.api.roomLeave(ctx.token(), id);
+    const id = room.id, ch = roomCh;
+    await ctx.api.roomLeave(ctx.token(), id).catch(() => {});
+    if (ch) ch.send("exit", { by: me() });
     closed(null);
   }
   function closed(msg) {
-    if (radio) { radio.stop(); radio = null; renderRadio(); }
+    if (radio) { radio.stop(); radio.destroy(); radio = null; renderRadio(); }
     if (roomCh) { roomCh.close(); roomCh = null; }
     room = null; host = false; started = false; result = null; myFinish = null;
     leaveBtn(false);
+    renderRadio();            // no challenge any more: hides the MIC chip and gives the engines their volume back
     $("oMp").hidden = true; $("again").hidden = false; $("toBox").textContent = "Box";
     setBusy(false);
     ctx.goHome();
@@ -510,7 +576,7 @@ export function initOnline(ctx) {
   return {
     start, stop, tick, onMyFinish, exit,
     onTake: (id) => { if (roomCh) roomCh.send("take", { id, raceNo }); },
-    debug: () => ({ loaded: [...loaded], gridHumans, raceNo, host, goSent, loadWait }),
+    debug: () => ({ loaded: [...loaded], gridHumans, raceNo, host, goSent, loadWait, radio }),
     inChallenge: () => !!room,
     isHost: () => host,
     othersStay: () => !!room && (room.members || []).filter((x) => x.state === "joined" && x.name !== me()).length >= 2,

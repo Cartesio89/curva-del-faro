@@ -15,6 +15,27 @@ export class Radio {
     this.wanted = new Set();         // names that have their radio on
     on("radio", (m) => this.onHello(m));
     on("rtc", (m) => { if (m.to === this.me) this.onSignal(m); });
+    // watchdog: messages on the room channel can get lost and mobile links drop; keep retrying until linked
+    this.timer = setInterval(() => this.watch(), 3000);
+    this.blocked = new Set();
+    this.unblock = () => { for (const a of this.blocked) a.play().then(() => this.blocked.delete(a)).catch(() => {}); };
+    addEventListener("pointerdown", this.unblock);
+  }
+  watch() {
+    if (!this.on) return;
+    const now = performance.now();
+    if (!this.lastHello || now - this.lastHello > 12000) this.hello();          // late joiners hear about me
+    for (const n of this.wanted) {
+      const p = this.peers.get(n);
+      if (!p) { this.maybeConnect(n); continue; }
+      const st = p.pc.connectionState;
+      if (st === "connected") { p.badSince = 0; continue; }
+      p.badSince = p.badSince || now;
+      // stuck "connecting" for 12 s, or "disconnected" for 6 s: start the call again
+      if ((st === "disconnected" && now - p.badSince > 6000) || (st !== "disconnected" && now - p.badSince > 12000)) {
+        this.drop(n); this.maybeConnect(n); this.onChange();
+      }
+    }
   }
   async iceServers() {
     if (this.ice && Date.now() - this.iceAt < 60 * 60 * 1000) return this.ice;
@@ -54,7 +75,7 @@ export class Radio {
     if (this.stream) for (const t of this.stream.getAudioTracks()) t.enabled = !m;
     this.onChange();
   }
-  hello() { this.send("radio", { n: this.me, on: this.on }); }
+  hello() { this.lastHello = performance.now(); this.send("radio", { n: this.me, on: this.on }); }
   onHello(m) {
     if (m.n === this.me) return;
     if (m.ask && this.on) this.hello();           // a newcomer asks who is on air
@@ -84,7 +105,8 @@ export class Radio {
         document.body.appendChild(peer.audio);
       }
       peer.audio.srcObject = e.streams[0];
-      peer.audio.play().catch(() => {});
+      // some phones refuse to start sound without a fresh tap: retry on the next touch
+      peer.audio.play().catch(() => this.blocked.add(peer.audio));
     };
     pc.onconnectionstatechange = () => {
       peer.state = pc.connectionState;
@@ -129,6 +151,7 @@ export class Radio {
     if (p.audio) { p.audio.srcObject = null; p.audio.remove(); }
     this.peers.delete(n);
   }
+  destroy() { this.stop(true); clearInterval(this.timer); removeEventListener("pointerdown", this.unblock); }
   // for the UI: who I can hear right now
   linked() { return [...this.peers].filter(([, p]) => p.state === "connected").map(([n]) => n); }
 }

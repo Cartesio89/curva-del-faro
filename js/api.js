@@ -55,6 +55,8 @@ export const api = {
   roomStatus: (token, room, status) => rpc("faro_room_status", { p_token: token, p_room: room, p_status: status }),
   challengeResult: (token, room, raceNo, position, realRank, humans, time, best, maxKmh) =>
     rpc("faro_challenge_result2", { p_token: token, p_room: room, p_race_no: raceNo, p_position: position, p_real_rank: realRank, p_humans: humans, p_time: time, p_best_lap: best, p_max_kmh: maxKmh ?? null }),
+  challengeForfeit: (token, room, raceNo, position, maxKmh) =>
+    rpc("faro_challenge_forfeit", { p_token: token, p_room: room, p_race_no: raceNo, p_position: position, p_max_kmh: maxKmh ?? null }),
   topChallenges: () => rpc("faro_board", { p_kind: "challenges" }),
   // every leaderboard: kind (endless, circuit, races, champ, challenges, speed), track/circuit filter, car filter
   board: (kind, filter, car) => rpc("faro_board", { p_kind: kind, p_filter: filter || null, p_car: car || null })

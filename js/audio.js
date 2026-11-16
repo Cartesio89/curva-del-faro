@@ -6,6 +6,7 @@
 
 const GEARS = [0.28, 0.46, 0.63, 0.8, 1.0];   // share of top speed at the rev limit in each gear
 const IDLE = 950, REDLINE = 7200;
+const DUCKED = 0.06;   // master volume while the radio is on (normal 0.55)
 
 function noiseBuffer(ctx) {
   const b = ctx.createBuffer(1, ctx.sampleRate * 1, ctx.sampleRate), d = b.getChannelData(0);
@@ -103,7 +104,7 @@ export class Sound {
       this.ctx = new AC();
       const comp = this.ctx.createDynamicsCompressor();
       comp.threshold.value = -14; comp.ratio.value = 4;
-      this.master = this.ctx.createGain(); this.master.gain.value = 0.55;
+      this.master = this.ctx.createGain(); this.master.gain.value = this.ducked ? DUCKED : 0.55;
       this.master.connect(comp).connect(this.ctx.destination);
       // tyre squeal / gravel: filtered noise
       const n = this.ctx.createBufferSource(); n.buffer = noiseBuffer(this.ctx); n.loop = true;
@@ -115,15 +116,17 @@ export class Sound {
     if (this.ctx.state === "suspended") this.ctx.resume();
   }
   // voices on the radio: engines go quieter so people can hear each other
+  // radio on: game sounds drop to about a tenth (-19 dB) so the voices are clear
   duck(on) {
+    if (this.ducked === on) return;
     this.ducked = on;
-    if (this.ctx && this.master && this.on) this.master.gain.setTargetAtTime(on ? 0.25 : 0.55, this.ctx.currentTime, 0.2);
+    if (this.ctx && this.master && this.on) this.master.gain.setTargetAtTime(on ? DUCKED : 0.55, this.ctx.currentTime, 0.2);
   }
   setOn(on) {
     this.on = on;
     try { localStorage.setItem("faro-sound", on ? "on" : "off"); } catch (_) {}
     if (!on) this.stopAll();
-    if (this.ctx) this.master.gain.setTargetAtTime(on ? (this.ducked ? 0.25 : 0.55) : 0, this.ctx.currentTime, 0.05);
+    if (this.ctx) this.master.gain.setTargetAtTime(on ? (this.ducked ? DUCKED : 0.55) : 0, this.ctx.currentTime, 0.05);
     if (on) this.unlock();
   }
   startRace(kind) {
