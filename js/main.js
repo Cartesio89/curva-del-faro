@@ -857,8 +857,8 @@ function pause() {
   if (race && race.meta.mp) {   // an online race cannot be stopped: the menu opens over it
     mpMenu = true; clearInput();
     $("pauseNote").hidden = false;
-    $("pauseNote").textContent = "La gara online non si ferma. " + (online.isHost() ? "Organizzi tu: se esci, la sfida finisce per tutti (con un solo avversario, vince lui)."
-      : online.othersStay() ? "Se esci, gli altri continuano senza di te." : "Se esci prima del traguardo, perdi: la sfida va all'altro giocatore.");
+    $("pauseNote").textContent = "La gara online non si ferma. Se esci, chiudi la pagina o resti scollegato per più di 15 secondi prima del traguardo, perdi: "
+      + (online.othersStay() ? "gli altri continuano senza di te." : "la sfida va all'altro giocatore.") + " Se sei già arrivato, il tuo risultato resta.";
     $("quit").textContent = "Esci dalla sfida";
     show("scrPause"); return;
   }

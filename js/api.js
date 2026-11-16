@@ -5,7 +5,7 @@ export const SUPABASE_KEY = "sb_publishable_M_ihkB0s9phBxPwDwQFd5g_KDzlQmDW";
 const URL = SUPABASE_URL + "/rest/v1/rpc/";
 const KEY = SUPABASE_KEY;
 
-async function rpc(name, args) {
+async function rpc(name, args, keepalive) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 12000);
   try {
@@ -13,7 +13,8 @@ async function rpc(name, args) {
       method: "POST",
       headers: { apikey: KEY, "Content-Type": "application/json" },
       body: JSON.stringify(args),
-      signal: ctrl.signal
+      signal: ctrl.signal,
+      keepalive: !!keepalive          // still delivered if the page is being closed
     });
     if (!r.ok) return { error: "network", status: r.status };
     return await r.json();
@@ -51,10 +52,12 @@ export const api = {
   roomRespond: (token, room, accept) => rpc("faro_room_respond", { p_token: token, p_room: room, p_accept: accept }),
   roomGet: (token, room) => rpc("faro_room_get", { p_token: token, p_room: room }),
   roomNext: (token, room, circuit) => rpc("faro_room_next", { p_token: token, p_room: room, p_circuit: circuit }),
-  roomLeave: (token, room) => rpc("faro_room_leave", { p_token: token, p_room: room }),
+  roomLeave: (token, room, closing) => rpc("faro_room_leave", { p_token: token, p_room: room }, closing),
+  roomPing: (token, room) => rpc("faro_room_ping", { p_token: token, p_room: room }),
+  roomDrop: (token, room, raceNo, name) => rpc("faro_room_drop", { p_token: token, p_room: room, p_race_no: raceNo, p_name: name }),
   roomStatus: (token, room, status) => rpc("faro_room_status", { p_token: token, p_room: room, p_status: status }),
   challengeResult: (token, room, raceNo, position, realRank, humans, time, best, maxKmh) =>
-    rpc("faro_challenge_result2", { p_token: token, p_room: room, p_race_no: raceNo, p_position: position, p_real_rank: realRank, p_humans: humans, p_time: time, p_best_lap: best, p_max_kmh: maxKmh ?? null }),
+    rpc("faro_challenge_result2", { p_token: token, p_room: room, p_race_no: raceNo, p_position: position, p_real_rank: realRank, p_humans: humans, p_time: time, p_best_lap: best, p_max_kmh: maxKmh ?? null }, true),
   challengeForfeit: (token, room, raceNo, position, maxKmh) =>
     rpc("faro_challenge_forfeit", { p_token: token, p_room: room, p_race_no: raceNo, p_position: position, p_max_kmh: maxKmh ?? null }),
   topChallenges: () => rpc("faro_board", { p_kind: "challenges" }),
@@ -81,5 +84,9 @@ export const ERRORS = {
   no_room: "La sfida non c'è più.",
   no_player: "Giocatore non trovato.",
   room_full: "La sfida è al completo (6).",
-  duplicate: "Risultato già salvato."
+  duplicate: "Risultato già salvato.",
+  forfeited: "Non vale: eri uscito o scollegato prima del traguardo, la sfida è andata all'altro giocatore.",
+  lost: "Hai perso: risultavi uscito o scollegato prima del traguardo.",
+  finished: "L'altro giocatore era già arrivato: il suo risultato vale.",
+  alive: "L'altro giocatore è ancora collegato."
 };

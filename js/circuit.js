@@ -426,6 +426,7 @@ export class CircuitRace {
         // same momentum-based solver for everyone (s is unwrapped progress, so use the wrapped gap).
         // A car moved by the network is moved only by its owner: here it pushes but is not pushed.
         if (a.remote && b.remote) continue;
+        if (a.gone || b.gone) continue;                                              // a player who left the race
         if (a.fall || b.fall || a.ghostT > this.t || b.ghostT > this.t) continue;   // in the water / just respawned
         // a shield lets the player pass through one car (then it is used up)
         const other = a.isPlayer ? b : b.isPlayer ? a : null;
@@ -509,7 +510,7 @@ export class CircuitRace {
     });
   }
   position(c = this.player) {
-    const order = this.cars.slice().sort((a, b) => {
+    const order = this.cars.filter((o) => !o.gone || o === c).sort((a, b) => {
       if (a.finished && b.finished) return a.finishTime - b.finishTime;
       if (a.finished) return -1;
       if (b.finished) return 1;
@@ -569,6 +570,17 @@ export class CircuitRace {
       if (r[5] >= 0 && !c.finished) { c.finished = true; c.finishTime = r[5]; this.finishedOrder.push(c); }
     }
   }
+  // a real player who left (closed the page, lost the connection): the car leaves the track
+  dropPlayer(name) {
+    const c = this.cars.find((o) => o.human && !o.isPlayer && o.name === name);
+    if (!c || c.gone) return false;
+    c.gone = true; c.v = 0; c.net = null;
+    return true;
+  }
+  // the organiser (who drove the AI) is gone: from now on this phone drives the AI cars itself
+  takeOverAI() {
+    for (const c of this.cars) if (!c.human && c.remote) { c.remote = false; c.net = null; }
+  }
   // dead reckoning from the last update, then glide towards it (no jumps on the screen)
   followNet(c, dt) {
     const n = c.net;
@@ -600,7 +612,7 @@ export class CircuitRace {
       }
       c.obj.position.set(tmp.x, y, tmp.z);
       if (c.fall && c.fall.landed && c.fall.sea != null && !c.fall.splashed) { c.fall.splashed = true; this.splashes.add(tmp.x, c.fall.sea, tmp.z); }
-      c.obj.visible = !(c.ghostT > this.t && Math.floor((c.ghostT - this.t) * 8) % 2 === 1);
+      c.obj.visible = !c.gone && !(c.ghostT > this.t && Math.floor((c.ghostT - this.t) * 8) % 2 === 1);
       let roll = -c.latV * 0.006;
       if (c.isPlayer && this.shake > 0) { c.obj.position.x += rnd(-0.06, 0.06); roll += rnd(-0.03, 0.03); }
       c.obj.rotation.set(0, tmp.heading + c.yaw, roll, "YXZ");
@@ -646,7 +658,7 @@ export class CircuitRace {
       for (let i = 0; i < w.px.length; i += 4) this.mapPath.push([w.px[i], w.pz[i]]);
     }
     const tmp = {};
-    const cars = this.cars.map((c) => { w.sample(c.s, c.x, tmp); return { x: tmp.x, z: tmp.z, isPlayer: c.isPlayer, color: c.obj.userData.color || "#ffffff", tag: c.isPlayer ? null : c.tag || null }; });
+    const cars = this.cars.filter((c) => !c.gone).map((c) => { w.sample(c.s, c.x, tmp); return { x: tmp.x, z: tmp.z, isPlayer: c.isPlayer, color: c.obj.userData.color || "#ffffff", tag: c.isPlayer ? null : c.tag || null }; });
     return { path: this.mapPath, cars };
   }
 

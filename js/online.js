@@ -8,13 +8,15 @@ import { Radio } from "./voice.js";
 const $ = (id) => document.getElementById(id);
 const SEND_EVERY = 0.1;            // seconds between state messages (10 per second)
 const LOST_AFTER = 12000;          // ms without news: that player has dropped out
+const DROP_AFTER = 20000;          // ms without news during the race: out of the race (the server needs 15 s without heartbeat)
+const PING_EVERY = 4000;           // heartbeat to the server while the challenge is open and on screen
 
 export function initOnline(ctx) {
   // ctx: { api, ERRORS, token(), profile(), setProfile, toast, show, goHome, startMpRace, endRace, mode(), fmtLap, fmtC,
   //        renderCtrl, ctrlBlock, carById, setupText, renderBoard, isRacing() }
   let lobby = null, online = [], room = null, roomCh = null, host = false, raceNo = 1;
   let pendingInvite = null, pollTimer = 0, sendAcc = 0, result = null, myFinish = null, hostWatch = 0, started = false;
-  let mySave = null, doneT = 0;   // mySave: { raceNo, promise } — my own result, saved the moment I cross the line
+  let mySave = null, doneT = 0, runAt = 0, hostGone = false, claiming = false;   // mySave: { raceNo, promise } — my own result, saved the moment I cross the line
   const me = () => ctx.profile() && ctx.profile().name;
 
   // ------------------------------------------------------------- lobby: who is online
@@ -282,6 +284,7 @@ export function initOnline(ctx) {
   function beginRace(m) {
     if (!room) return;
     started = true; result = null; myFinish = null; sendAcc = 0; hostWatch = 0; doneT = 0; leaveBtn(false);
+    runAt = 0; hostGone = false; claiming = false;
     raceNo = m.raceNo; room.circuit = m.circuit; room.car = m.car; room.setup = m.setup;
     loaded = new Set(); loadWait = 0; goSent = false;
     gridHumans = m.grid.filter((g) => g.kind === "human").map((g) => g.name);
@@ -329,6 +332,15 @@ export function initOnline(ctx) {
     sendAcc += dt;
     if (sendAcc >= SEND_EVERY) { sendAcc = 0; roomCh.send("st", { n: me(), rows: race.netState(host) }); }
     const now = performance.now();
+    if (!runAt) runAt = now;
+    // a real player who vanished (page or browser closed, phone off, no connection, app in the background):
+    // after 20 s without news the car leaves the track and that player has lost this race
+    if (!result) for (const c of race.cars) {
+      if (!c.human || !c.remote) continue;
+      const last = Math.max(c.seen || 0, runAt);
+      if (!c.gone && !c.finished && now - last > DROP_AFTER) { race.dropPlayer(c.name); onDrop(c.name, race); }
+      else if (c.gone && c.seen && now - c.seen < 2000) { c.gone = false; ctx.toast(`${c.name} è di nuovo collegato.`); }
+    }
     if (host && !result) {
       // everybody home (or dropped out) -> final order
       // every real player home (or dropped out) -> final order. The AI cars do not hold it up:
@@ -338,16 +350,94 @@ export function initOnline(ctx) {
       if (myFinish) hostWatch += dt;
       if (race.state !== "countdown" && (doneT > 2 || hostWatch > 120)) sendResult(race);
     }
-    if (!host && race.t > 20 && !result) {
-      // no news from the host (it drives the AI): the challenge is over
+    if (!host && !result && myFinish) {
+      // I'm home and the organiser (who sends the final order) is gone: my result is saved, show the order as I see it
       const h = race.cars.find((c) => c.remote && c.name === room.host);
-      if (h && h.seen && now - h.seen > LOST_AFTER * 1.5) {
-        // I'm already home: my result is saved; show the order as I see it instead of dropping everything
-        if (myFinish) onResult({ ...localOrder(race), hostGone: true });
-        else closed(`${room.host} si è scollegato: sfida finita.`);
-      }
+      if (hostGone || (h && race.t > 20 && now - Math.max(h.seen || 0, runAt) > LOST_AFTER * 1.5)) onResult({ ...localOrder(race), hostGone: true });
     }
   }
+  // a player is out of the race (vanished, or "Esci" with more players still racing)
+  function onDrop(name, race) {
+    if (!room || result) return;
+    ctx.toast(`${name} è uscito dalla gara: ha perso.`, "bad");
+    if (name === room.host && !host) { hostGone = true; race.takeOverAI(); }   // the AI cars go on, driven here
+    const alive = race.cars.filter((c) => c.human && c.remote && !c.gone);
+    if (!alive.length && !myFinish) claimDrop(name, race);
+    else reportDrop(name, race);
+  }
+  // tell the server, which checks it against the heartbeat: a result sent later by that player will not count
+  async function reportDrop(name, race) {
+    const no = raceNo, roomId = room && room.id;
+    for (let i = 0; i < 12 && room && room.id === roomId && raceNo === no; i++) {
+      const c = race.cars.find((o) => o.name === name);
+      if (c && !c.gone) return;                                   // came back in time
+      const r = await ctx.api.roomDrop(ctx.token(), roomId, no, name).catch(() => ({ error: "network" }));
+      if (!(r && (r.error === "alive" || r.error === "network"))) return;
+      await new Promise((res) => setTimeout(res, 3000));
+    }
+  }
+  // nobody else is left in the race: ask the server (which knows who still sends a heartbeat) for the win
+  async function claimDrop(by, race) {
+    if (claiming) return;
+    claiming = true;
+    const no = raceNo, roomId = room.id;
+    const still = () => room && room.id === roomId && raceNo === no && !result && !myFinish && ctx.race() === race;
+    for (let i = 0; i < 40 && still(); i++) {
+      if (race.cars.some((c) => c.human && c.remote && !c.gone)) break;   // came back: race on
+      const pos = race.position(race.player);
+      const vmax = race.player.maxV > 0 ? Math.round(race.player.maxV * 3.6 * 10) / 10 : null;
+      const r = await ctx.api.challengeForfeit(ctx.token(), roomId, no, pos, vmax).catch(() => ({ error: "network" }));
+      if (!still()) break;
+      if (r && (r.profile || r.error === "duplicate")) { forfeitWin(by, race, r); return; }
+      if (r && r.error === "lost") { lostRace(); return; }
+      if (r && r.error === "finished") { ctx.toast(`${by} era già arrivato: il suo risultato vale. Finisci la gara.`); break; }
+      if (r && (r.error === "no_room" || r.error === "no_session")) break;
+      await new Promise((res) => setTimeout(res, r && r.error === "alive" ? 4000 : 2500));   // alive: the server still hears it
+    }
+    claiming = false;
+  }
+  // I was the one out of the race (closed the app, lost the connection, app in the background too long)
+  function lostRace(to) {
+    if (!room) return;
+    result = { raceNo, lost: true };
+    leaveBtn(false);
+    ctx.endRaceKeepRoom();
+    $("oTitle").textContent = "Hai perso la sfida";
+    $("oDist").textContent = "—"; $("oUnit").textContent = "";
+    $("oL1").textContent = "Tempo"; $("oTime").textContent = "ritirato";
+    $("oL2").textContent = "Giro migliore"; $("oCp").textContent = "—";
+    $("oL3").textContent = "Motivo"; $("oNear").textContent = "scollegato";
+    $("oL4").textContent = "Premio"; $("oHit").textContent = ctx.fmtC(0);
+    $("oOrder").hidden = true; $("oChamp").hidden = true; $("oUnlocks").textContent = ""; $("oVmax").hidden = true;
+    $("again").hidden = true; $("toBox").textContent = "Esci dalla sfida";
+    const box = $("oMp"); box.textContent = "";
+    const p = document.createElement("p"); p.className = "note";
+    p.textContent = "Sei rimasto fuori dal gioco per più di 15 secondi prima del traguardo (pagina chiusa, connessione persa o app in secondo piano)"
+      + (to ? `: la vittoria è andata a ${to}.` : ": per questa gara sei ritirato.");
+    box.appendChild(p); box.hidden = false;
+    $("oSave").textContent = "Nessun risultato: chi esce prima del traguardo perde.";
+    ctx.show("scrOver");
+  }
+  // ------------------------------------------------------------- heartbeat
+  async function ping() {
+    if (!room || document.hidden || !ctx.token()) return;
+    const id = room.id;
+    const r = await ctx.api.roomPing(ctx.token(), id).catch(() => null);
+    if (!r || !room || room.id !== id) return;
+    if ((r.dropped || r.lost_to) && started && !result && !myFinish && r.race_no === raceNo) lostRace(r.lost_to);
+  }
+  setInterval(ping, PING_EVERY);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) ping(); });
+  // page or browser being closed: leave the challenge right away (my result first, if I crossed the line)
+  function closing() {
+    if (!room) return;
+    const id = room.id;
+    if (myFinish) saveMine(ctx.race());
+    ctx.api.roomLeave(ctx.token(), id, true);
+    try { roomCh && roomCh.send("exit", { by: me() }); } catch (e) {}
+  }
+  window.addEventListener("pagehide", closing);
+  window.addEventListener("pageshow", (e) => { if (e.persisted && room) closed("Sei uscito dalla sfida."); });
   function onState(m) {
     const race = ctx.race();
     // the host only sends race states after the start: if the "go" got lost, this is the start
@@ -500,6 +590,11 @@ export function initOnline(ctx) {
       if (quitter && quitter.finished) { closed(`${m.by} ha vinto ed è uscito dalla sfida.`); return; }
       forfeitWin(m.by, race); return;
     }
+    // during a race with more players still racing: the one who left is out, the others go on (also if it was the organiser)
+    if (started && !result && race && race.dropPlayer(m.by)) {
+      room.members = (room.members || []).map((x) => (x.name === m.by ? { ...x, state: "left" } : x));
+      onDrop(m.by, race); return;
+    }
     if (m.by === room.host || stay.length < 2) { closed(`${m.by} ha chiuso la sfida.`); return; }
     room.members = (room.members || []).map((x) => (x.name === m.by ? { ...x, state: "left" } : x));
     ctx.toast(`${m.by} è uscito dalla sfida.`);
@@ -509,7 +604,7 @@ export function initOnline(ctx) {
     } else if (!started) renderRoom();
   }
   // the other player quit before the finish: my race stops here and the challenge is mine
-  async function forfeitWin(by, race) {
+  async function forfeitWin(by, race, got) {
     const pos = race.position(race.player);
     const vmax = race.player.maxV > 0 ? Math.round(race.player.maxV * 3.6 * 10) / 10 : null;
     const no = raceNo, roomId = room.id;
@@ -529,14 +624,16 @@ export function initOnline(ctx) {
     $("oMp").hidden = false;
     ctx.show("scrOver");
     const save = $("oSave"); save.textContent = "Registro la vittoria…";
-    let r = null;
-    for (let i = 0; i < 4; i++) {           // the other one's exit may reach the server a moment after its message
+    let r = got || null;
+    // the other one's exit may reach the server a moment after its message (or never, if the page was closed:
+    // then the server needs 15 s without its heartbeat)
+    for (let i = 0; i < 14 && !got; i++) {
       r = await ctx.api.challengeForfeit(ctx.token(), roomId, no, pos, vmax).catch(() => ({ error: "network" }));
-      if (!(r && (r.error === "implausible" || r.error === "network"))) break;
-      await new Promise((res) => setTimeout(res, 1200));
+      if (!(r && (r.error === "implausible" || r.error === "network" || r.error === "alive"))) break;
+      await new Promise((res) => setTimeout(res, 1500));
     }
     if (r && r.profile) { ctx.setProfile(r.profile, true); save.textContent = "Vittoria per ritiro registrata in classifica Sfide (senza tempo né monete)."; }
-    else if (r && r.error === "duplicate") save.textContent = "Vittoria già registrata.";
+    else if (r && r.error === "duplicate") save.textContent = "Vittoria registrata in classifica Sfide (senza tempo né monete).";
     else save.textContent = ctx.ERRORS[r && r.error] || "Vittoria non registrata.";
     $("oBoardTitle").textContent = "Top 10 · Sfide";
     ctx.api.topChallenges().then((rows) => ctx.renderBoard($("oBoard"), rows, me(), "challenges"));
