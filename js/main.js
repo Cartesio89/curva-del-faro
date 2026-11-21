@@ -1015,16 +1015,45 @@ function updateHud() {
 }
 
 // ------------------------------------------------------------------ input
-function clearInput() { input.gas = input.brake = input.left = input.right = false; document.querySelectorAll(".btn.on").forEach((b) => b.classList.remove("on")); }
+function clearInput() { input.gas = input.brake = input.left = input.right = false; steerHolds.clear(); document.querySelectorAll(".btn.on").forEach((b) => b.classList.remove("on")); }
+// Steering comes from keys and fingers. Every press is a "hold" {dir, t0}: the most recent one wins (pressing → while ← is
+// still down steers right, instead of cancelling out), and a tap is held at least STEER_MIN_MS so that a quick
+// correction between two frames is never lost.
+const STEER_MIN_MS = 90;
+const steerHolds = new Map();
+function applySteer() {
+  let best = null;
+  for (const h of steerHolds.values()) if (!best || h.t0 > best.t0) best = h;
+  input.left = !!best && best.dir < 0; input.right = !!best && best.dir > 0;
+  $("bL").classList.toggle("on", input.left); $("bR").classList.toggle("on", input.right);
+}
+function steerDown(id, dir) {
+  const h = steerHolds.get(id);
+  if (h && h.dir === dir && !h.ending) return;
+  if (h && h.timer) clearTimeout(h.timer);
+  steerHolds.set(id, { dir, t0: performance.now() });
+  applySteer();
+}
+function steerUp(id) {
+  const h = steerHolds.get(id);
+  if (!h || h.ending) return;
+  const left = STEER_MIN_MS - (performance.now() - h.t0);
+  if (left > 0) { h.ending = true; h.timer = setTimeout(() => { if (steerHolds.get(id) === h) { steerHolds.delete(id); applySteer(); } }, left); return; }
+  steerHolds.delete(id); applySteer();
+}
 const keyMap = { ArrowUp: "gas", KeyW: "gas", Space: "gas", ArrowDown: "brake", KeyS: "brake", ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right" };
 addEventListener("keydown", (e) => {
   if (e.target && (e.target.tagName === "INPUT")) return;
   if (e.code === "KeyP" || e.code === "Escape") { if (mode === "paused") resume(); else pause(); return; }
   if (e.code === "KeyN" || e.code === "Space") { input.nos = true; e.preventDefault(); return; }
   const k = keyMap[e.code];
-  if (k && mode === "race") { e.preventDefault(); input[k] = true; }
+  if (k && mode === "race") {
+    e.preventDefault();
+    if (k === "left" || k === "right") { if (!e.repeat) steerDown("k" + e.code, k === "left" ? -1 : 1); }
+    else input[k] = true;
+  }
 });
-addEventListener("keyup", (e) => { const k = keyMap[e.code]; if (k) input[k] = false; });
+addEventListener("keyup", (e) => { const k = keyMap[e.code]; if (!k) return; if (k === "left" || k === "right") steerUp("k" + e.code); else input[k] = false; });
 addEventListener("blur", clearInput);
 function bindPad(btn, key) {
   const down = (e) => { e.preventDefault(); if (mode !== "race") return; try { btn.setPointerCapture(e.pointerId); } catch (_) {} input[key] = true; btn.classList.add("on"); };
@@ -1043,7 +1072,16 @@ function bindPad(btn, key) {
   addEventListener("keydown", (e) => { if ((e.code === "KeyR" || e.code === "KeyC") && race && !(e.target && e.target.tagName === "INPUT")) { race.rearView = true; rb.classList.add("on"); } });
   addEventListener("keyup", (e) => { if ((e.code === "KeyR" || e.code === "KeyC") && race) { race.rearView = false; rb.classList.remove("on"); } });
 }
-bindPad($("bG"), "gas"); bindPad($("bB"), "brake"); bindPad($("bL"), "left"); bindPad($("bR"), "right");
+bindPad($("bG"), "gas"); bindPad($("bB"), "brake");
+{
+  // one touch area for both arrows: left or right of the middle point between them, re-checked while the thumb slides
+  const pad = $("steerPad");
+  const side = (x) => { const a = $("bL").getBoundingClientRect(), b = $("bR").getBoundingClientRect(); return x < (a.right + b.left) / 2 ? -1 : 1; };
+  pad.addEventListener("pointerdown", (e) => { e.preventDefault(); if (mode !== "race") return; try { pad.setPointerCapture(e.pointerId); } catch (_) {} steerDown("p" + e.pointerId, side(e.clientX)); });
+  pad.addEventListener("pointermove", (e) => { const h = steerHolds.get("p" + e.pointerId); if (h && !h.ending && mode === "race") steerDown("p" + e.pointerId, side(e.clientX)); });
+  for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) pad.addEventListener(ev, (e) => steerUp("p" + e.pointerId));
+  pad.addEventListener("contextmenu", (e) => e.preventDefault());
+}
 // NOS fires once per press (the race clears the request after using it)
 $("bNos").addEventListener("pointerdown", (e) => { e.preventDefault(); input.nos = true; });
 stage.addEventListener("contextmenu", (e) => e.preventDefault());

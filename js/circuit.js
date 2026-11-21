@@ -190,9 +190,10 @@ export class CircuitRace {
   // ------------------------------------------------------------------ driving
   // NOS: one charge = 4 s of boost (+20 % top speed, +60 % acceleration), like the turbo of the endless track
   fireNos() {
-    if (this.state !== "run" || this.nos <= 0 || this.nosT > 0) return false;
-    this.nos--; this.nosT = 4;
-    this.hooks.onToast(this.nos ? `NOS! (ne restano ${this.nos})` : "NOS!", "good");
+    if (this.state !== "run" || this.nos <= 0) return false;
+    this.nos--; this.nosT = Math.min(20, this.nosT + 4);    // fired while still boosting: the time adds up
+    const plus = this.nosT > 4 ? ` +4 s (${Math.ceil(this.nosT)} s)` : "";
+    this.hooks.onToast((this.nos ? `NOS!${plus} (ne restano ${this.nos})` : `NOS!${plus}`), "good");
     return true;
   }
   drivePlayer(c, dt, input) {

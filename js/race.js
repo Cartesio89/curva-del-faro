@@ -213,7 +213,7 @@ export class Race {
     const h = this.hooks;
     if (type === "coin") { this.coins++; h.onCoin && h.onCoin(this.coins); }
     else if (type === "clock") { this.timeLeft += 3; h.onToast("+3 s", "good"); }
-    else if (type === "turbo") { this.turbo = 4; h.onToast("Turbo!", "good"); }
+    else if (type === "turbo") { this.turbo = Math.min(20, this.turbo + 4); h.onToast(this.turbo > 4 ? `Turbo +4 s (${Math.ceil(this.turbo)} s)` : "Turbo!", "good"); }
     else if (type === "shield") { this.shield++; h.onToast(this.shield > 1 ? `Scudi: ${this.shield}` : "Scudo attivo", "good"); }
     else if (type === "oil") { this.slip = OIL_TIME; this.slipDir = Math.random() < 0.5 ? -1 : 1; h.onToast("Olio!", "bad"); }
     else if (type === "cones") {

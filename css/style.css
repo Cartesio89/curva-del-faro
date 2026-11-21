@@ -400,3 +400,8 @@ button.small { padding: 6px 12px; font-size: 14px; min-height: 0; }
 .split-row .split-box { position: static; transform: none; margin-top: 2px; }
 .split-row:has(.split-box[hidden]) { display: none; }
 @media (orientation: portrait) { .split-row { justify-content: flex-end; } }
+
+/* steering: the whole area around the two arrows reacts (gap included, out to the screen edge), and the thumb can slide from one to the other */
+.steer-pad { pointer-events: auto; touch-action: none; margin: -12px; padding: 8px 18px 12px 12px; }
+.steer-pad .btn-steer { pointer-events: none; }
+body.tilt-mode .steer-pad { pointer-events: none; }

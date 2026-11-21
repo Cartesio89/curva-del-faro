@@ -44,9 +44,10 @@ export function oilSkid(c, dir, dt) {
   c.v *= Math.pow(0.88, dt);
 }
 
-// Turns digital buttons into a progressive steering value (about 0.35 s to full lock, faster back to centre).
+// Turns digital buttons into a progressive steering value (seconds to full lock = 1/up, faster back to centre).
+export const STEER = { up: 3, back: 6 };
 export function smoothSteer(current, target, dt) {
-  const rate = target === 0 || Math.sign(target) !== Math.sign(current) ? 6 : 3;
+  const rate = target === 0 || Math.sign(target) !== Math.sign(current) ? STEER.back : STEER.up;
   const d = target - current;
   return current + clamp(d, -rate * dt, rate * dt);
 }
